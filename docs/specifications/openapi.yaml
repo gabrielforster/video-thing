@@ -1,0 +1,580 @@
+openapi: 3.0.3
+info:
+  title: Video Platform API
+  version: "1.0.0"
+  description: >
+    MVP API Service for the video platform (Go/Gin). This service owns video
+    metadata CRUD, issues S3 presigned upload URLs, and exposes playback
+    metadata once a video has been processed. It does not receive video file
+    bytes and does not perform transcoding: uploads go directly to S3 via
+    presigned PUT URLs, and transcoding is triggered by the S3 event ->
+    SQS -> worker pipeline running out-of-band from this API.
+  contact:
+    name: Video Platform Engineering
+tags:
+  - name: Videos
+    description: Video metadata, upload URL issuance, and playback information.
+  - name: Health
+    description: Liveness and readiness probes for orchestration/monitoring.
+servers:
+  - url: https://api.dev.video-platform.example.com/v1
+    description: Development (placeholder)
+
+paths:
+  /videos:
+    post:
+      operationId: createVideo
+      summary: Create a video record and get an upload target
+      description: >
+        Creates a new video record in status `uploading` and returns a
+        presigned S3 PUT URL the client must use to upload the raw file
+        directly to S3. The API never receives the file body.
+      tags:
+        - Videos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVideoRequest'
+            example:
+              title: "My Vacation Video"
+      responses:
+        '201':
+          description: Video record created; upload target included.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateVideoResponse'
+              example:
+                video:
+                  id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  title: "My Vacation Video"
+                  status: "uploading"
+                  duration: null
+                  width: null
+                  height: null
+                  size: null
+                  master_playlist: null
+                  thumbnail: null
+                  created_at: "2026-07-23T14:00:00Z"
+                  updated_at: "2026-07-23T14:00:00Z"
+                upload:
+                  uploadUrl: "https://video-platform-uploads.s3.amazonaws.com/raw/3fa85f64-5717-4562-b3fc-2c963f66afa6?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=..."
+                  method: "PUT"
+                  expiresAt: "2026-07-23T14:15:00Z"
+                  headers:
+                    Content-Type: "application/octet-stream"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listVideos
+      summary: List videos
+      description: Returns videos sorted by `created_at` descending, paginated via `limit`/`offset`.
+      tags:
+        - Videos
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of items to return.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of items to skip from the start of the result set.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Paginated list of videos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoList'
+              example:
+                items:
+                  - id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    title: "My Vacation Video"
+                    status: "ready"
+                    duration: 125.4
+                    width: 1920
+                    height: 1080
+                    size: 52428800
+                    master_playlist: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
+                    thumbnail: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
+                    created_at: "2026-07-23T14:00:00Z"
+                    updated_at: "2026-07-23T14:05:32Z"
+                  - id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    title: "Product Demo"
+                    status: "processing"
+                    duration: null
+                    width: null
+                    height: null
+                    size: 10485760
+                    master_playlist: null
+                    thumbnail: null
+                    created_at: "2026-07-23T13:50:00Z"
+                    updated_at: "2026-07-23T13:52:10Z"
+                pagination:
+                  limit: 20
+                  offset: 0
+                  total: 2
+                  nextOffset: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /videos/{id}:
+    get:
+      operationId: getVideo
+      summary: Get a single video's metadata and playback info
+      description: >
+        Returns full metadata for a video, including `master_playlist` (populated
+        once `status` is `ready`) and `thumbnail`.
+      tags:
+        - Videos
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+      responses:
+        '200':
+          description: Video metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+              example:
+                id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                title: "My Vacation Video"
+                status: "ready"
+                duration: 125.4
+                width: 1920
+                height: 1080
+                size: 52428800
+                master_playlist: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
+                thumbnail: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
+                created_at: "2026-07-23T14:00:00Z"
+                updated_at: "2026-07-23T14:05:32Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: deleteVideo
+      summary: Delete a video and its assets
+      description: >
+        Deletes the video metadata record and enqueues deletion of associated
+        S3 assets (raw upload, renditions, thumbnail). Idempotent from the
+        caller's perspective: a successful delete returns `204` with no body.
+      tags:
+        - Videos
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+      responses:
+        '204':
+          description: Video and its assets were deleted successfully.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /videos/{id}/complete:
+    post:
+      operationId: completeVideoUpload
+      summary: Signal that the client finished uploading to S3
+      description: >
+        Optional client-called endpoint invoked immediately after a successful
+        S3 upload completes. It transitions the video's status from
+        `uploading` to `processing` so the UI can reflect progress without
+        waiting on the asynchronous pipeline.
+
+
+        This endpoint is a UX optimization only. The system of record for
+        triggering actual transcoding remains the S3 event notification ->
+        SQS -> worker pipeline, which runs independently and will process the
+        video (and correct its status) even if this endpoint is never called
+        or fails.
+      tags:
+        - Videos
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+      responses:
+        '200':
+          description: Video status transitioned to `processing`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+              example:
+                id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                title: "My Vacation Video"
+                status: "processing"
+                duration: null
+                width: null
+                height: null
+                size: 52428800
+                master_playlist: null
+                thumbnail: null
+                created_at: "2026-07-23T14:00:00Z"
+                updated_at: "2026-07-23T14:03:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The video is not in the `uploading` state, so it cannot be
+            transitioned to `processing` (e.g. it was already completed,
+            already processed, or has failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: "invalid_state_transition"
+                  message: "Video 3fa85f64-5717-4562-b3fc-2c963f66afa6 is not in the 'uploading' state and cannot be marked as processing."
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /healthz:
+    get:
+      operationId: getLiveness
+      summary: Liveness probe
+      description: Returns 200 if the process is up and able to serve traffic. Performs no downstream checks.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "ok"
+
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Readiness probe
+      description: Returns 200 if the service is ready to accept traffic (verifies DB connectivity), 503 otherwise.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is ready; dependencies are reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessStatus'
+              example:
+                status: "ok"
+                checks:
+                  database: "ok"
+        '503':
+          description: Service is not ready; at least one dependency check failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessStatus'
+              example:
+                status: "unavailable"
+                checks:
+                  database: "unreachable"
+
+components:
+  parameters:
+    VideoId:
+      name: id
+      in: path
+      required: true
+      description: Video identifier (UUID).
+      schema:
+        type: string
+        format: uuid
+      example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+  schemas:
+    VideoStatus:
+      type: string
+      description: >
+        Lifecycle state of a video. `uploading`: record created, S3 upload
+        pending/in-flight. `processing`: raw file uploaded, transcoding
+        pipeline running. `ready`: renditions and playlist available.
+        `failed`: upload or processing failed.
+      enum:
+        - uploading
+        - processing
+        - ready
+        - failed
+
+    Video:
+      type: object
+      description: A video resource and its processing/playback metadata.
+      required:
+        - id
+        - title
+        - status
+        - duration
+        - width
+        - height
+        - size
+        - master_playlist
+        - thumbnail
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique video identifier.
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        title:
+          type: string
+          description: Human-readable title provided at creation time.
+          example: "My Vacation Video"
+        status:
+          $ref: '#/components/schemas/VideoStatus'
+        duration:
+          type: number
+          format: double
+          nullable: true
+          description: Duration in seconds. Null until the video has been processed.
+          example: 125.4
+        width:
+          type: integer
+          format: int32
+          nullable: true
+          description: Video width in pixels. Null until processed.
+          example: 1920
+        height:
+          type: integer
+          format: int32
+          nullable: true
+          description: Video height in pixels. Null until processed.
+          example: 1080
+        size:
+          type: integer
+          format: int64
+          nullable: true
+          description: Size of the uploaded source file in bytes. Null until the upload completes.
+          example: 52428800
+        master_playlist:
+          type: string
+          format: uri
+          nullable: true
+          description: URL of the HLS master playlist. Null until `status` is `ready`.
+          example: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
+        thumbnail:
+          type: string
+          format: uri
+          nullable: true
+          description: URL of the generated thumbnail image. Null until `status` is `ready`.
+          example: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp the video record was created.
+          example: "2026-07-23T14:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: Timestamp the video record was last updated.
+          example: "2026-07-23T14:05:32Z"
+
+    CreateVideoRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Title for the new video.
+          example: "My Vacation Video"
+
+    UploadTarget:
+      type: object
+      description: Presigned S3 upload target the client uses to PUT the raw video file directly to S3.
+      required:
+        - uploadUrl
+        - method
+        - expiresAt
+      properties:
+        uploadUrl:
+          type: string
+          format: uri
+          description: Presigned S3 URL to upload the raw file to via HTTP PUT.
+          example: "https://video-platform-uploads.s3.amazonaws.com/raw/3fa85f64-5717-4562-b3fc-2c963f66afa6?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=..."
+        method:
+          type: string
+          description: HTTP method the client must use to perform the upload.
+          enum:
+            - PUT
+          example: "PUT"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Expiration timestamp of the presigned URL. The client must complete the upload before this time.
+          example: "2026-07-23T14:15:00Z"
+        headers:
+          type: object
+          description: Additional headers the client must include on the PUT request (e.g. Content-Type).
+          additionalProperties:
+            type: string
+          example:
+            Content-Type: "application/octet-stream"
+
+    CreateVideoResponse:
+      type: object
+      required:
+        - video
+        - upload
+      properties:
+        video:
+          $ref: '#/components/schemas/Video'
+        upload:
+          $ref: '#/components/schemas/UploadTarget'
+
+    PaginationMeta:
+      type: object
+      required:
+        - limit
+        - offset
+        - total
+        - nextOffset
+      properties:
+        limit:
+          type: integer
+          format: int32
+          description: Maximum number of items requested.
+          example: 20
+        offset:
+          type: integer
+          format: int32
+          description: Number of items skipped before this page.
+          example: 0
+        total:
+          type: integer
+          format: int64
+          description: Total number of videos matching the query.
+          example: 2
+        nextOffset:
+          type: integer
+          format: int32
+          nullable: true
+          description: Offset to use to fetch the next page, or null if there are no more results.
+          example: null
+
+    VideoList:
+      type: object
+      required:
+        - items
+        - pagination
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Video'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+          example: "ok"
+
+    ReadinessStatus:
+      type: object
+      required:
+        - status
+        - checks
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - unavailable
+          example: "ok"
+        checks:
+          type: object
+          description: Per-dependency readiness check results.
+          required:
+            - database
+          properties:
+            database:
+              type: string
+              enum:
+                - ok
+                - unreachable
+              example: "ok"
+
+    Error:
+      type: object
+      description: Standard error envelope returned by all non-2xx responses.
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code.
+              example: "not_found"
+            message:
+              type: string
+              description: Human-readable error message.
+              example: "Video not found."
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "bad_request"
+              message: "title is required."
+    NotFound:
+      description: The requested resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "not_found"
+              message: "Video not found."
+    InternalError:
+      description: An unexpected error occurred while processing the request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "internal_error"
+              message: "An unexpected error occurred. Please try again."
