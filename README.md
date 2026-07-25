@@ -14,7 +14,7 @@ Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver 
 |---|---|
 | [docs/specifications/video-thing-spec.md](docs/specifications/video-thing-spec.md) | Master spec: architecture, scope, tech stack, flows |
 | [docs/architecture/c4-model.md](docs/architecture/c4-model.md) | C4 Context, Container, and Component diagrams |
-| [docs/architecture/sequence-diagrams.md](docs/architecture/sequence-diagrams.md) | Upload, processing, playback, failure/retry flows |
+| [docs/architecture/sequence-diagrams.md](docs/architecture/sequence-diagrams.md) | Upload, completion, processing, playback, failure/retry, deletion flows |
 | [docs/specifications/openapi.yaml](docs/specifications/openapi.yaml) | OpenAPI 3.0.3 contract for the API service |
 | [docs/specifications/database-schema.md](docs/specifications/database-schema.md) | Schema, indexing, migration strategy (golang-migrate) |
 | [docs/specifications/ffmpeg-profiles.md](docs/specifications/ffmpeg-profiles.md) | HLS rendition ladder, packaging, thumbnails |

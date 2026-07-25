@@ -1,6 +1,6 @@
 # Sequence Diagrams
 
-This document captures the four core request/event flows in the platform: upload, asynchronous processing, playback, and failure/retry handling. Each diagram reflects the MVP architecture: a Go/Gin API, PostgreSQL for state, S3 for object storage (separate raw and processed buckets), SQS for decoupling upload events from processing, an ECS Fargate worker running FFmpeg, and CloudFront as the playback CDN in front of the processed bucket.
+This document captures the core request/event flows in the platform: upload, client-reported upload completion, asynchronous processing, playback, failure/retry handling, and deletion. Each diagram reflects the MVP architecture: a Go/Gin API, PostgreSQL for state, S3 for object storage (separate raw and processed buckets), SQS for decoupling upload events from processing, an ECS Fargate worker running FFmpeg, and CloudFront as the playback CDN in front of the processed bucket.
 
 ## Upload Flow
 
@@ -27,6 +27,33 @@ sequenceDiagram
 ```
 
 The presigned URL is scoped to a single object key (typically `{video_id}/original.<ext>`) and expires quickly, limiting the blast radius if it leaks. Because the event notification — not the browser's PUT response — is the source of truth for "upload finished," a client that dies mid-upload simply never triggers processing, and the row stays in `uploading` (a background sweeper can later expire stale ones).
+
+## Client-Reported Upload Completion (UX Optimization)
+
+`POST /videos/{id}/complete` exists purely so the UI can flip from "uploading" to "processing" the instant the browser's `PUT` finishes, instead of waiting on S3's event notification and an SQS round-trip, which adds a perceptible delay. It is explicitly not the trigger for transcoding — that remains the S3 `ObjectCreated` → SQS → worker pipeline from the Processing Flow, running independently. This diagram shows why the endpoint has to be optimistic rather than authoritative: the API cannot yet know the object actually landed in S3 (no event has arrived), so it trusts the client's claim only enough to update a status field, and guards against re-entry with a state check.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant API
+    participant Postgres
+
+    Note over Browser: browser's PUT to S3 (Upload Flow) has just returned 200
+
+    Browser->>API: POST /videos/{id}/complete
+    API->>Postgres: SELECT video WHERE id=? FOR UPDATE
+    Postgres-->>API: status=uploading
+
+    alt status is uploading
+        API->>Postgres: UPDATE video SET status=processing
+        API-->>Browser: 200 { status: processing }
+    else status is already processing/ready/failed
+        API-->>Browser: 409 invalid_state_transition
+        Note over API: not an error in practice -- means the S3 event<br/>pipeline already advanced the row first
+    end
+```
+
+The 409 case is the expected outcome of a benign race, not a bug: if the S3 event notification and worker pickup happen to beat this call (small uploads on a fast connection), the row is already past `uploading` by the time `/complete` arrives. The client should treat 409 here as "fine, someone already moved this forward," not surface it as a failure.
 
 ## Processing Flow
 
@@ -155,3 +182,34 @@ sequenceDiagram
 ```
 
 Setting `status=failed` is treated as a distinct, deliberate action rather than something inferred from the message reaching the DLQ implicitly — this keeps the DB and the queue as two independently reconciled sources of truth, and makes it possible to build an operator-facing alarm (e.g. CloudWatch alarm on `ApproximateNumberOfMessagesVisible` for the DLQ) that fires purely off queue depth, independent of whether the DB write path is healthy.
+
+## Deletion Flow
+
+`DELETE /videos/{id}` removes the DB row first, then cleans up S3 objects across both buckets (raw original, every HLS rendition, thumbnails) by listing and deleting everything under the video's key prefix — there's no dedicated deletion queue in the infrastructure (only the one processing queue SQS module provisions), so this is a direct, synchronous cleanup from the API rather than another async hop. Deleting the DB row before the S3 objects, rather than after, is the important ordering choice: it means a video can never be visible via the API while its assets are only partially deleted, at the cost of a small window where the DB says "gone" but bytes still exist in S3 (acceptable, since nothing reads S3 directly by key without going through the API first).
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant API
+    participant Postgres
+    participant S3Raw as S3 (raw bucket)
+    participant S3Proc as S3 (processed bucket)
+
+    Browser->>API: DELETE /videos/{id}
+    API->>Postgres: DELETE FROM video WHERE id=?
+    Postgres-->>API: 1 row deleted (or 0 if already gone/never existed)
+
+    par cleanup raw bucket
+        API->>S3Raw: ListObjectsV2 (prefix={id}/)
+        S3Raw-->>API: object keys
+        API->>S3Raw: DeleteObjects (batch)
+    and cleanup processed bucket
+        API->>S3Proc: ListObjectsV2 (prefix={id}/)
+        S3Proc-->>API: object keys (renditions, thumbnails)
+        API->>S3Proc: DeleteObjects (batch)
+    end
+
+    API-->>Browser: 204 No Content
+```
+
+Deleting a video that's mid-processing is a benign race, not a special case: the DB row disappears immediately, but the worker (per the Processing Flow) is mid-pipeline against the *same* `{id}` key prefix. Its later `UPDATE video SET status=...` simply matches zero rows and is ignored, and its final `PutObject`s into the processed bucket either land after this flow's `DeleteObjects` already ran (leaving orphaned objects with no automatic cleanup today — worth a lifecycle rule or a periodic sweep if this race turns out to matter in practice) or race harmlessly with it — either way, nothing resurrects the deleted record, because the API never re-creates a row from S3 state.
