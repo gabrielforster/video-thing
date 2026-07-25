@@ -1,4 +1,4 @@
-# Video Platform MVP - Technical Specification (v2)
+# Video Thing MVP - Technical Specification (v2)
 
 Status: Accepted
 Supersedes: v1 (informal draft)
@@ -103,7 +103,7 @@ For the full request/response and failure-path detail behind this diagram, see:
 ## 6. Repository Structure
 
 ```text
-video-platform/
+video-thing/
     apps/
         api/
         worker/
@@ -142,7 +142,7 @@ docs/
         0005-terraform-for-infrastructure.md
         0006-hls-for-video-delivery.md
     specifications/
-        video-platform-spec.md        (this file)
+        video-thing-spec.md        (this file)
         openapi.yaml
         database-schema.md
         ffmpeg-profiles.md

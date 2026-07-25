@@ -1,7 +1,7 @@
 variable "project_name" {
   description = "Project name used for resource naming and tagging."
   type        = string
-  default     = "video-platform"
+  default     = "video-thing"
 }
 
 variable "environment" {

@@ -1,28 +1,28 @@
-# C4 Model: Video Platform
+# C4 Model: Video Thing
 
-This document describes the Video Platform architecture using the [C4 model](https://c4model.com/) at three levels of abstraction: System Context, Container, and Component. It reflects the MVP scope of the system: video upload, asynchronous processing (transcoding, packaging, thumbnailing), and HLS playback. Authentication, live streaming, DRM, and analytics are explicitly out of MVP scope and are noted only where they provide useful future context.
+This document describes the Video Thing architecture using the [C4 model](https://c4model.com/) at three levels of abstraction: System Context, Container, and Component. It reflects the MVP scope of the system: video upload, asynchronous processing (transcoding, packaging, thumbnailing), and HLS playback. Authentication, live streaming, DRM, and analytics are explicitly out of MVP scope and are noted only where they provide useful future context.
 
 ---
 
 ## Level 1: System Context
 
-The context diagram shows the Video Platform as a single system and the actors and external services that interact with it from the outside.
+The context diagram shows the Video Thing as a single system and the actors and external services that interact with it from the outside.
 
 ```mermaid
 C4Context
-    title System Context diagram for Video Platform
+    title System Context diagram for Video Thing
 
     Person(user, "End User / Content Uploader", "An anonymous visitor who both uploads videos and watches them. MVP has no authentication, so these are modeled as one actor.")
 
-    System(videoPlatform, "Video Platform", "Allows a user to upload a video, have it transcoded into adaptive-bitrate renditions, and stream it back via HLS.")
+    System(videoThing, "Video Thing", "Allows a user to upload a video, have it transcoded into adaptive-bitrate renditions, and stream it back via HLS.")
 
     System_Ext(s3, "AWS S3", "Object storage for raw uploads and processed HLS assets (thumbnails, manifests, segments).")
     System_Ext(cloudfront, "AWS CloudFront", "CDN that serves processed video assets to viewers with low latency.")
     System_Ext(sqs, "AWS SQS", "Durable queue that decouples upload completion from asynchronous processing.")
 
-    Rel(user, videoPlatform, "Uploads videos to, and watches videos from", "HTTPS")
-    Rel(videoPlatform, s3, "Stores raw uploads and processed assets in", "HTTPS / AWS API")
-    Rel(videoPlatform, sqs, "Publishes and consumes processing jobs via", "AWS API")
+    Rel(user, videoThing, "Uploads videos to, and watches videos from", "HTTPS")
+    Rel(videoThing, s3, "Stores raw uploads and processed assets in", "HTTPS / AWS API")
+    Rel(videoThing, sqs, "Publishes and consumes processing jobs via", "AWS API")
     Rel(cloudfront, s3, "Fetches processed assets from (origin)", "HTTPS")
     Rel(user, cloudfront, "Streams HLS video from", "HTTPS")
 
@@ -38,13 +38,13 @@ In the MVP, these are **the same actor**. There is no authentication, no account
 
 ### System purpose
 
-The Video Platform accepts a video file from a user, uploads it directly to object storage, processes it in the background into multiple HLS renditions and thumbnails, and serves the result back through a CDN for adaptive playback. The system boundary here includes the API and worker logic that constitutes "the platform"; S3, CloudFront, and SQS are drawn as external systems because they are managed AWS services the platform depends on and configures, not code the platform team owns or deploys.
+The Video Thing accepts a video file from a user, uploads it directly to object storage, processes it in the background into multiple HLS renditions and thumbnails, and serves the result back through a CDN for adaptive playback. The system boundary here includes the API and worker logic that constitutes "the platform"; S3, CloudFront, and SQS are drawn as external systems because they are managed AWS services the platform depends on and configures, not code the platform team owns or deploys.
 
 ### MVP boundary vs. future context
 
 Out of scope for MVP, mentioned here only as future context:
 
-- **Authentication** — would insert as a new external identity provider (e.g., an IdP box) with a `Rel` from the User to it, and the User→Video Platform relationship would carry a bearer token/session cookie instead of being anonymous. It would also introduce an owner concept on uploaded videos, which does not exist today.
+- **Authentication** — would insert as a new external identity provider (e.g., an IdP box) with a `Rel` from the User to it, and the User→Video Thing relationship would carry a bearer token/session cookie instead of being anonymous. It would also introduce an owner concept on uploaded videos, which does not exist today.
 - **Live streaming** — would introduce a new ingest protocol (RTMP/SRT) and a separate low-latency delivery path; not modeled here.
 - **DRM** — would sit between CloudFront and the viewer (license server interaction) and is not represented.
 - **Analytics** — would add an event-collection external system fed by both the frontend player and CloudFront access logs; not represented.
@@ -53,15 +53,15 @@ Out of scope for MVP, mentioned here only as future context:
 
 ## Level 2: Container Diagram
 
-The container diagram zooms into the Video Platform system boundary and shows the deployable/runnable units and the managed AWS services they talk to directly.
+The container diagram zooms into the Video Thing system boundary and shows the deployable/runnable units and the managed AWS services they talk to directly.
 
 ```mermaid
 C4Container
-    title Container diagram for Video Platform
+    title Container diagram for Video Thing
 
     Person(user, "End User / Content Uploader", "Anonymous user; uploads and watches videos.")
 
-    System_Boundary(videoPlatform, "Video Platform") {
+    System_Boundary(videoThing, "Video Thing") {
         Container(spa, "Web Frontend", "React, Vite, TypeScript, hls.js", "Single-page app for uploading videos and playing back HLS streams in the browser.")
         Container(api, "API Service", "Go, Gin", "Stateless REST API. Issues presigned upload URLs, exposes video metadata/status, enqueues processing jobs, serves health checks.")
         Container(worker, "Worker Service", "ECS Fargate, Go, FFmpeg", "Long-running background service that polls SQS and runs the transcode/package/thumbnail pipeline for each uploaded video.")

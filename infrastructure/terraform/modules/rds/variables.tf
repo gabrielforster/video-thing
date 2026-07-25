@@ -21,7 +21,7 @@ variable "private_subnet_ids" {
 variable "db_name" {
   description = "Initial database name."
   type        = string
-  default     = "videoplatform"
+  default     = "videothing"
 }
 
 variable "db_username" {

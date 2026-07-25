@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Video Platform API
+  title: Video Thing API
   version: "1.0.0"
   description: >
     MVP API Service for the video platform (Go/Gin). This service owns video
@@ -10,14 +10,14 @@ info:
     presigned PUT URLs, and transcoding is triggered by the S3 event ->
     SQS -> worker pipeline running out-of-band from this API.
   contact:
-    name: Video Platform Engineering
+    name: Video Thing Engineering
 tags:
   - name: Videos
     description: Video metadata, upload URL issuance, and playback information.
   - name: Health
     description: Liveness and readiness probes for orchestration/monitoring.
 servers:
-  - url: https://api.dev.video-platform.example.com/v1
+  - url: https://api.dev.video-thing.example.com/v1
     description: Development (placeholder)
 
 paths:
@@ -60,7 +60,7 @@ paths:
                   created_at: "2026-07-23T14:00:00Z"
                   updated_at: "2026-07-23T14:00:00Z"
                 upload:
-                  uploadUrl: "https://video-platform-uploads.s3.amazonaws.com/raw/3fa85f64-5717-4562-b3fc-2c963f66afa6?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=..."
+                  uploadUrl: "https://video-thing-uploads.s3.amazonaws.com/raw/3fa85f64-5717-4562-b3fc-2c963f66afa6?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=..."
                   method: "PUT"
                   expiresAt: "2026-07-23T14:15:00Z"
                   headers:
@@ -111,8 +111,8 @@ paths:
                     width: 1920
                     height: 1080
                     size: 52428800
-                    master_playlist: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
-                    thumbnail: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
+                    master_playlist: "https://cdn.video-thing.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
+                    thumbnail: "https://cdn.video-thing.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
                     created_at: "2026-07-23T14:00:00Z"
                     updated_at: "2026-07-23T14:05:32Z"
                   - id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
@@ -162,8 +162,8 @@ paths:
                 width: 1920
                 height: 1080
                 size: 52428800
-                master_playlist: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
-                thumbnail: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
+                master_playlist: "https://cdn.video-thing.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
+                thumbnail: "https://cdn.video-thing.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
                 created_at: "2026-07-23T14:00:00Z"
                 updated_at: "2026-07-23T14:05:32Z"
         '404':
@@ -374,13 +374,13 @@ components:
           format: uri
           nullable: true
           description: URL of the HLS master playlist. Null until `status` is `ready`.
-          example: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
+          example: "https://cdn.video-thing.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/master.m3u8"
         thumbnail:
           type: string
           format: uri
           nullable: true
           description: URL of the generated thumbnail image. Null until `status` is `ready`.
-          example: "https://cdn.video-platform.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
+          example: "https://cdn.video-thing.example.com/videos/3fa85f64-5717-4562-b3fc-2c963f66afa6/thumbnail.jpg"
         created_at:
           type: string
           format: date-time
@@ -416,7 +416,7 @@ components:
           type: string
           format: uri
           description: Presigned S3 URL to upload the raw file to via HTTP PUT.
-          example: "https://video-platform-uploads.s3.amazonaws.com/raw/3fa85f64-5717-4562-b3fc-2c963f66afa6?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=..."
+          example: "https://video-thing-uploads.s3.amazonaws.com/raw/3fa85f64-5717-4562-b3fc-2c963f66afa6?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=..."
         method:
           type: string
           description: HTTP method the client must use to perform the upload.

@@ -63,7 +63,7 @@ what the *application* assumes at runtime and are already scoped tightly in
 This role creates IAM roles/policies itself (the `iam` module) and can create ECS task
 roles with arbitrary permissions — that's an inherent privilege-escalation surface for any
 Terraform CI role, not specific to this repo. Mitigate with:
-- resource-name scoping (`video-platform-*`) everywhere the action supports it,
+- resource-name scoping (`video-thing-*`) everywhere the action supports it,
 - a permissions boundary attached to every role this CI creates (see 3.9),
 - branch/environment-scoped trust policy (section 2) so only reviewed changes on `main`
   (or an approved environment) can assume the role at all.
@@ -85,8 +85,8 @@ table shouldn't be destroyable by routine applies:
     "s3:ListBucket"
   ],
   "Resource": [
-    "arn:aws:s3:::video-platform-terraform-state",
-    "arn:aws:s3:::video-platform-terraform-state/*"
+    "arn:aws:s3:::video-thing-terraform-state",
+    "arn:aws:s3:::video-thing-terraform-state/*"
   ]
 },
 {
@@ -97,7 +97,7 @@ table shouldn't be destroyable by routine applies:
     "dynamodb:PutItem",
     "dynamodb:DeleteItem"
   ],
-  "Resource": "arn:aws:dynamodb:*:ACCOUNT_ID:table/video-platform-terraform-locks"
+  "Resource": "arn:aws:dynamodb:*:ACCOUNT_ID:table/video-thing-terraform-locks"
 }
 ```
 
@@ -138,7 +138,7 @@ real control here, not resource scoping.
     "ecr:PutLifecyclePolicy", "ecr:GetLifecyclePolicy", "ecr:DeleteLifecyclePolicy",
     "ecr:TagResource", "ecr:ListTagsForResource"
   ],
-  "Resource": "arn:aws:ecr:*:ACCOUNT_ID:repository/video-platform-*"
+  "Resource": "arn:aws:ecr:*:ACCOUNT_ID:repository/video-thing-*"
 }
 ```
 
@@ -154,8 +154,8 @@ real control here, not resource scoping.
     "s3:PutBucketCORS", "s3:GetBucketCORS", "s3:PutLifecycleConfiguration", "s3:GetLifecycleConfiguration"
   ],
   "Resource": [
-    "arn:aws:s3:::video-platform-*-raw-uploads",
-    "arn:aws:s3:::video-platform-*-processed-assets"
+    "arn:aws:s3:::video-thing-*-raw-uploads",
+    "arn:aws:s3:::video-thing-*-processed-assets"
   ]
 }
 ```
@@ -170,7 +170,7 @@ real control here, not resource scoping.
     "sqs:CreateQueue", "sqs:DeleteQueue", "sqs:GetQueueAttributes", "sqs:SetQueueAttributes",
     "sqs:GetQueueUrl", "sqs:TagQueue", "sqs:ListQueueTags"
   ],
-  "Resource": "arn:aws:sqs:*:ACCOUNT_ID:video-platform-*"
+  "Resource": "arn:aws:sqs:*:ACCOUNT_ID:video-thing-*"
 }
 ```
 
@@ -210,13 +210,13 @@ can't mint a role with more power than itself.
     "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies",
     "iam:TagRole", "iam:ListRoleTags"
   ],
-  "Resource": "arn:aws:iam::ACCOUNT_ID:role/video-platform-*"
+  "Resource": "arn:aws:iam::ACCOUNT_ID:role/video-thing-*"
 },
 {
   "Sid": "IamPassRoleScoped",
   "Effect": "Allow",
   "Action": "iam:PassRole",
-  "Resource": "arn:aws:iam::ACCOUNT_ID:role/video-platform-*",
+  "Resource": "arn:aws:iam::ACCOUNT_ID:role/video-thing-*",
   "Condition": {
     "StringEquals": { "iam:PassedToService": "ecs-tasks.amazonaws.com" }
   }
@@ -233,7 +233,7 @@ can't mint a role with more power than itself.
     "logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:DescribeLogGroups",
     "logs:PutRetentionPolicy", "logs:TagResource", "logs:ListTagsForResource"
   ],
-  "Resource": "arn:aws:logs:*:ACCOUNT_ID:log-group:/ecs/video-platform-*"
+  "Resource": "arn:aws:logs:*:ACCOUNT_ID:log-group:/ecs/video-thing-*"
 }
 ```
 
@@ -251,7 +251,7 @@ and a Secrets Manager secret holding the generated password (`modules/rds/main.t
     "rds:CreateDBSubnetGroup", "rds:DeleteDBSubnetGroup", "rds:DescribeDBSubnetGroups",
     "rds:AddTagsToResource", "rds:ListTagsForResource"
   ],
-  "Resource": "arn:aws:rds:*:ACCOUNT_ID:*:video-platform-*"
+  "Resource": "arn:aws:rds:*:ACCOUNT_ID:*:video-thing-*"
 },
 {
   "Sid": "RdsSecrets",
@@ -261,7 +261,7 @@ and a Secrets Manager secret holding the generated password (`modules/rds/main.t
     "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:DescribeSecret",
     "secretsmanager:TagResource"
   ],
-  "Resource": "arn:aws:secretsmanager:*:ACCOUNT_ID:secret:video-platform-*"
+  "Resource": "arn:aws:secretsmanager:*:ACCOUNT_ID:secret:video-thing-*"
 }
 ```
 
@@ -343,7 +343,7 @@ existing topic, doesn't create one. If that changes, add `sns:CreateTopic`/`Dele
   real AWS limitation, not something narrowed further by better ARN scoping. The trust
   policy (section 2) is the actual control boundary for those.
 - `staging`/`production` environment directories are reserved but not implemented (see
-  README) — the `video-platform-*` prefix scoping above already covers them once they
+  README) — the `video-thing-*` prefix scoping above already covers them once they
   exist, no policy changes needed when they're added.
 - Split into a separate read-only role (`plan`-only, no mutating actions) for PRs and a
   full apply role gated to `main`/environment approval, if PR-triggered `terraform plan` is

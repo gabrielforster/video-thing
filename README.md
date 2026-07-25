@@ -1,4 +1,4 @@
-# Video Platform
+# Video Thing
 
 Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver via CDN. Event-driven, horizontally scalable, deployed on AWS via Terraform.
 
@@ -6,13 +6,13 @@ Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver 
 
 ## Start here
 
-[`docs/specifications/video-platform-spec.md`](docs/specifications/video-platform-spec.md) is the entry point — architecture, tech stack, flows, and links to every other document below.
+[`docs/specifications/video-thing-spec.md`](docs/specifications/video-thing-spec.md) is the entry point — architecture, tech stack, flows, and links to every other document below.
 
 ## Documents
 
 | Path | Contents |
 |---|---|
-| [docs/specifications/video-platform-spec.md](docs/specifications/video-platform-spec.md) | Master spec: architecture, scope, tech stack, flows |
+| [docs/specifications/video-thing-spec.md](docs/specifications/video-thing-spec.md) | Master spec: architecture, scope, tech stack, flows |
 | [docs/architecture/c4-model.md](docs/architecture/c4-model.md) | C4 Context, Container, and Component diagrams |
 | [docs/architecture/sequence-diagrams.md](docs/architecture/sequence-diagrams.md) | Upload, processing, playback, failure/retry flows |
 | [docs/specifications/openapi.yaml](docs/specifications/openapi.yaml) | OpenAPI 3.0.3 contract for the API service |
@@ -30,7 +30,7 @@ terraform init
 terraform plan
 ```
 
-`staging/` and `production/` environment directories are reserved but not yet implemented — copy `dev/*.tf` and adjust `.tfvars` (see the spec's [Section 6](docs/specifications/video-platform-spec.md#6-repository-structure)).
+`staging/` and `production/` environment directories are reserved but not yet implemented — copy `dev/*.tf` and adjust `.tfvars` (see the spec's [Section 6](docs/specifications/video-thing-spec.md#6-repository-structure)).
 
 ## Repository layout
 
