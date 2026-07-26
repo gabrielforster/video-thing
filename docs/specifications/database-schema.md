@@ -169,9 +169,9 @@ responsibility across every calling service.
 Migrations are managed with [`golang-migrate`](https://github.com/golang-migrate/migrate),
 following its standard file-based convention:
 
-- Files live under `db/migrations/` (this spec's copy lives alongside the design
-  doc, under `docs/specifications/migrations/`, and is mirrored into `db/migrations/`
-  at implementation time) and are named:
+- Files live under `packages/database/migrations/` (see
+  `../../packages/database/migrations/000001_create_videos_table.{up,down}.sql`
+  for the reference migration) and are named:
 
   ```
   {version}_{description}.up.sql

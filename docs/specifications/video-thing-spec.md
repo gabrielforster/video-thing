@@ -244,7 +244,7 @@ Exact per-rendition bitrates, codecs, segment duration, and playlist constructio
 
 ## 12. Database
 
-Schema, enum-vs-check-constraint rationale, indexing, the `updated_at` trigger convention, and the golang-migrate migration strategy are fully specified in **[database-schema.md](database-schema.md)**, with the reference migration at `migrations/000001_create_videos_table.{up,down}.sql`.
+Schema, enum-vs-check-constraint rationale, indexing, the `updated_at` trigger convention, and the golang-migrate migration strategy are fully specified in **[database-schema.md](database-schema.md)**, with the reference migration at `../../packages/database/migrations/000001_create_videos_table.{up,down}.sql`.
 
 Summary of the `videos` table: `id`, `title`, `status` (uploading / processing / ready / failed), `duration`, `width`, `height`, `size_bytes`, `master_playlist`, `thumbnail`, `source_bucket`, `source_key`, `error_message`, `created_at`, `updated_at`.
 
@@ -371,7 +371,7 @@ The MVP is considered complete when:
 | [architecture/sequence-diagrams.md](../architecture/sequence-diagrams.md) | Upload, Processing, Playback, Failure/Retry sequence diagrams |
 | [specifications/openapi.yaml](openapi.yaml) | OpenAPI 3.0.3 contract for the API service |
 | [specifications/database-schema.md](database-schema.md) | Schema, indexing, trigger convention, migration strategy |
-| [specifications/migrations/](migrations/) | golang-migrate reference migration (000001) |
+| [packages/database/migrations/](../../packages/database/migrations/) | golang-migrate reference migration (000001) |
 | [specifications/ffmpeg-profiles.md](ffmpeg-profiles.md) | Rendition ladder, HLS packaging, thumbnails, failure classification |
 | [decisions/0001-go-for-backend-services.md](../decisions/0001-go-for-backend-services.md) | Why Go over Node.js/Python/Rust |
 | [decisions/0002-ecs-fargate-for-compute.md](../decisions/0002-ecs-fargate-for-compute.md) | Why ECS Fargate over EKS/EC2/Lambda |
