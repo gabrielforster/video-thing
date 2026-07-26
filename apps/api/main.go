@@ -9,10 +9,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
+	gin.SetMode(gin.ReleaseMode)
+
 	cfg, err := LoadConfig(os.Getenv)
 	if err != nil {
 		log.Fatalf("config: %v", err)
