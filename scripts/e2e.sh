@@ -12,7 +12,7 @@ export DATABASE_URL="postgres://user:userpassword@localhost:5432/videothing?sslm
 export RAW_BUCKET=video-thing-dev-raw-uploads
 export PROCESSED_BUCKET=video-thing-dev-processed-assets
 export PUBLIC_ASSET_BASE_URL="$AWS_ENDPOINT_URL/$PROCESSED_BUCKET"
-export PORT=8080
+export PORT="${PORT:-8080}"
 
 for bin in docker jq ffmpeg aws go curl; do
     command -v "$bin" >/dev/null || { echo "missing required binary: $bin" >&2; exit 1; }

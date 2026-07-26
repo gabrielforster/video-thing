@@ -34,7 +34,7 @@ worker:
 		--queue-name "$(QUEUE_NAME)" --query QueueUrl --output text)" go run ./apps/worker
 
 web:
-	cd apps/web && npm install && npm run dev
+	cd apps/web && pnpm install && pnpm dev
 
 e2e:
 	./scripts/e2e.sh
