@@ -54,6 +54,22 @@ describe('App', () => {
     expect(screen.getByTestId('player')).toHaveAttribute('data-src', 'http://cdn.test/processed/v1/master.m3u8')
   })
 
+  it('still reaches ready when the optional complete call fails', async () => {
+    vi.mocked(api.completeUpload).mockRejectedValue(new Error('409: invalid_state_transition'))
+    vi.mocked(api.getVideo)
+      .mockResolvedValueOnce(video({ status: 'processing' }))
+      .mockResolvedValue(video({ status: 'ready', master_playlist: 'http://cdn.test/processed/v1/master.m3u8' }))
+
+    render(<App pollMs={10} />)
+    await selectFile()
+
+    await waitFor(() => expect(api.completeUpload).toHaveBeenCalledWith('v1'))
+
+    await waitFor(() => expect(screen.getByTestId('player')).toBeInTheDocument())
+    expect(screen.getByTestId('player')).toHaveAttribute('data-src', 'http://cdn.test/processed/v1/master.m3u8')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('clears a transient poll error once a later poll succeeds', async () => {
     vi.mocked(api.getVideo)
       .mockRejectedValueOnce(new Error('network blip'))

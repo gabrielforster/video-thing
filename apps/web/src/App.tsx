@@ -24,8 +24,11 @@ export default function App({ pollMs = 2000 }: { pollMs?: number }) {
       const created = await createVideo(file.name)
       setVideo(created.video)
       await uploadFile(created.upload, file, setProgress)
-      setVideo(await completeUpload(created.video.id))
       setPhase('watching')
+      try {
+        setVideo(await completeUpload(created.video.id))
+      } catch {
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setPhase('idle')
