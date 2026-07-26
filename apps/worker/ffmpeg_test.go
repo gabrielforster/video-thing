@@ -71,6 +71,7 @@ func TestTranscodeArgsMatchProfile(t *testing.T) {
 		"-i":                    "/work/source.mp4",
 		"-vf":                   "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
 		"-c:v":                  "libx264",
+		"-pix_fmt":              "yuv420p",
 		"-profile:v":            "main",
 		"-level:v":              "3.1",
 		"-b:v":                  "2800k",

@@ -71,6 +71,11 @@ func transcodeArgs(src, outDir string) []string {
 		"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
 			renditionWidth, renditionHeight, renditionWidth, renditionHeight),
 		"-c:v", "libx264",
+		// yuv420p is mandatory, not a default: -profile:v main cannot encode a
+		// 4:2:2/4:4:4 or 10-bit source (ProRes, many screen recorders, HDR
+		// phone captures, ffmpeg's own testsrc), and libx264 refuses the whole
+		// encode rather than converting on its own.
+		"-pix_fmt", "yuv420p",
 		"-profile:v", "main", "-level:v", "3.1",
 		"-b:v", "2800k", "-maxrate", "3000k", "-bufsize", "6000k",
 		"-r", "30",
