@@ -26,8 +26,9 @@ export default function App({ pollMs = 2000 }: { pollMs?: number }) {
       await uploadFile(created.upload, file, setProgress)
       setPhase('watching')
       try {
-        setVideo(await completeUpload(created.video.id))
-      } catch {
+        await completeUpload(created.video.id)
+      } catch (err) {
+        console.warn('complete upload nudge failed', err)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
