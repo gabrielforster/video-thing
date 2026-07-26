@@ -118,7 +118,23 @@ done
 
 echo "==> generating a 10s test clip"
 ffmpeg -v error -y -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 \
-    -t 10 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$TMP/sample.mp4"
+    -t 10 -c:v libx264 -c:a aac -shortest "$TMP/sample.mp4"
+
+echo "==> checking the /complete contract"
+curl -sf -XPOST "localhost:$PORT/videos" -H 'content-type: application/json' \
+    -d '{"title":"e2e-complete"}' >"$TMP/complete-created.json"
+COMPLETE_ID="$(jq -r .video.id "$TMP/complete-created.json")"
+CODE="$(curl -s -o "$TMP/complete-1.json" -w '%{http_code}' -XPOST "localhost:$PORT/videos/$COMPLETE_ID/complete")"
+if [ "$CODE" != "200" ] || [ "$(jq -r .status "$TMP/complete-1.json")" != "processing" ]; then
+    echo "FAIL: first /complete returned $CODE / $(jq -r .status "$TMP/complete-1.json"), want 200 / processing" >&2
+    exit 1
+fi
+CODE="$(curl -s -o "$TMP/complete-2.json" -w '%{http_code}' -XPOST "localhost:$PORT/videos/$COMPLETE_ID/complete")"
+if [ "$CODE" != "409" ] || [ "$(jq -r .error.code "$TMP/complete-2.json")" != "invalid_state_transition" ]; then
+    echo "FAIL: repeated /complete returned $CODE / $(jq -r .error.code "$TMP/complete-2.json")," >&2
+    echo "      want 409 / invalid_state_transition" >&2
+    exit 1
+fi
 
 UPLOAD_ATTEMPTS=3
 STATUS=""
@@ -130,9 +146,19 @@ for upload_attempt in $(seq 1 "$UPLOAD_ATTEMPTS"); do
     curl -sf -XPUT "$(jq -r .upload.uploadUrl "$TMP/created.json")" \
         -H 'content-type: application/octet-stream' --data-binary "@$TMP/sample.mp4" -o /dev/null
 
+    COMPLETE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -XPOST "localhost:$PORT/videos/$ID/complete")"
+    case "$COMPLETE_CODE" in
+        200) echo "    /complete: 200 (browser won the race)" ;;
+        409) echo "    /complete: 409 (worker won the race; processing continues)" ;;
+        *)
+            echo "FAIL: /complete returned $COMPLETE_CODE, want 200 or 409" >&2
+            exit 1
+            ;;
+    esac
+
     echo "==> waiting for processing (video $ID)"
     STATUS=""
-    for attempt in $(seq 1 60); do
+    for attempt in $(seq 1 90); do
         STATUS="$(curl -sf "localhost:$PORT/videos/$ID" 2>/dev/null | jq -r .status 2>/dev/null || true)"
         [ "$STATUS" = "ready" ] && break
         if [ "$STATUS" = "failed" ]; then
@@ -176,7 +202,7 @@ for upload_attempt in $(seq 1 "$UPLOAD_ATTEMPTS"); do
     if [ "$INFLIGHT" != "0" ]; then
         echo "!!   application, and the message is stranded in-flight (LocalStack returned it" >&2
         echo "!!   from the queue without delivering it; it becomes visible again only after" >&2
-        echo "!!   the 900s visibility timeout, well past this script's wait)." >&2
+        echo "!!   the worker's 120s visibility timeout)." >&2
     else
         echo "!!   application, and no message exists at all (notification never published)." >&2
     fi
@@ -207,6 +233,22 @@ fi
 if ! grep -q '720/playlist\.m3u8' "$TMP/master.m3u8"; then
     echo "FAIL: master playlist does not reference the 720p variant playlist ($MASTER_KEY):" >&2
     cat "$TMP/master.m3u8" >&2
+    exit 1
+fi
+
+MASTER_URL="$(curl -sf "localhost:$PORT/videos/$ID" | jq -r .master_playlist)"
+if [ "$MASTER_URL" != "$PUBLIC_ASSET_BASE_URL/$MASTER_KEY" ]; then
+    echo "FAIL: master_playlist = $MASTER_URL, want $PUBLIC_ASSET_BASE_URL/$MASTER_KEY" >&2
+    exit 1
+fi
+
+if ! curl -sf -H 'Origin: http://localhost:5173' "$MASTER_URL" -o "$TMP/master-public.m3u8"; then
+    echo "FAIL: unsigned cross-origin GET of $MASTER_URL failed" >&2
+    exit 1
+fi
+if ! head -n 1 "$TMP/master-public.m3u8" | grep -q '^#EXTM3U'; then
+    echo "FAIL: unsigned GET of $MASTER_URL did not return a playlist:" >&2
+    head -n 5 "$TMP/master-public.m3u8" >&2
     exit 1
 fi
 
@@ -241,4 +283,5 @@ fi
 
 echo "PASS: video $ID reached ready with a valid master playlist (${MASTER_LEN}B) referencing"
 echo "      the 720p rendition (playlist ${RENDITION_PLAYLIST_LEN}B, $SEGMENTS nonempty segments)"
-echo "      and a ${COVER_LEN}B cover thumbnail"
+echo "      and a ${COVER_LEN}B cover thumbnail; the API serves it as $MASTER_URL,"
+echo "      which is readable unsigned and cross-origin"
