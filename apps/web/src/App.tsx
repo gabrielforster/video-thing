@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import Hls from 'hls.js'
 
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress'
+
 import { completeUpload, createVideo, getVideo, uploadFile, type Video } from './api'
 
 type Phase = 'idle' | 'uploading' | 'watching' | 'done'
@@ -37,6 +41,7 @@ export default function App({ pollMs = 2000 }: { pollMs?: number }) {
         const latest = await getVideo(video.id)
         if (cancelled) return
         setVideo(latest)
+        setError(null)
         if (latest.status === 'ready' || latest.status === 'failed') setPhase('done')
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
@@ -51,36 +56,52 @@ export default function App({ pollMs = 2000 }: { pollMs?: number }) {
 
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-6 p-8">
-      <h1 className="text-2xl font-semibold">Video Thing</h1>
+      <h1 className="font-heading text-2xl font-semibold">Video Thing</h1>
 
-      <div className="flex flex-col gap-3 rounded-lg border p-4">
-        <label htmlFor="file" className="text-sm font-medium">Video file</label>
-        <input
-          id="file"
-          type="file"
-          accept="video/*"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-        <button
-          className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
-          disabled={!file || phase === 'uploading' || phase === 'watching'}
-          onClick={startUpload}
-        >
-          Upload
-        </button>
+      <Card>
+        <CardHeader>
+          <CardTitle>Upload a video</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <label htmlFor="file" className="text-sm font-medium">Video file</label>
+          <input
+            id="file"
+            type="file"
+            accept="video/*"
+            className="text-sm text-muted-foreground"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            className="self-start"
+            disabled={!file || phase === 'uploading' || phase === 'watching'}
+            onClick={startUpload}
+          >
+            Upload
+          </Button>
 
-        {phase === 'uploading' && (
-          <progress className="w-full" value={progress} max={100}>{progress}%</progress>
-        )}
-        {video && <p className="text-sm text-neutral-600">Status: {video.status}</p>}
-        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-        {video?.status === 'failed' && (
-          <p role="alert" className="text-sm text-red-600">Processing failed.</p>
-        )}
-      </div>
+          {phase === 'uploading' && (
+            <Progress value={progress}>
+              <ProgressLabel>Uploading</ProgressLabel>
+              <ProgressValue />
+            </Progress>
+          )}
+          {video && <p className="text-sm text-muted-foreground">Status: {video.status}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {video?.status === 'failed' && (
+            <p role="alert" className="text-sm text-destructive">Processing failed.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {video?.status === 'ready' && video.master_playlist && (
-        <Player src={video.master_playlist} />
+        <Card>
+          <CardHeader>
+            <CardTitle>{video.title}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Player src={video.master_playlist} />
+          </CardContent>
+        </Card>
       )}
     </main>
   )

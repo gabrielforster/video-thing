@@ -54,6 +54,20 @@ describe('App', () => {
     expect(screen.getByTestId('player')).toHaveAttribute('data-src', 'http://cdn.test/processed/v1/master.m3u8')
   })
 
+  it('clears a transient poll error once a later poll succeeds', async () => {
+    vi.mocked(api.getVideo)
+      .mockRejectedValueOnce(new Error('network blip'))
+      .mockResolvedValue(video({ status: 'ready', master_playlist: 'http://cdn.test/processed/v1/master.m3u8' }))
+
+    render(<App pollMs={10} />)
+    await selectFile()
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/network blip/i))
+
+    await waitFor(() => expect(screen.getByTestId('player')).toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('shows the error state when processing fails', async () => {
     vi.mocked(api.getVideo).mockResolvedValue(video({ status: 'failed' }))
 
