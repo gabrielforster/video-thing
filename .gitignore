@@ -9,3 +9,6 @@ crash.*.log
 # Binaries left in the repo root by `go build ./apps/...`
 /api
 /worker
+
+node_modules/
+dist/
