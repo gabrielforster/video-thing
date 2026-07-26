@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -95,6 +96,10 @@ func TestTranscodeArgsMatchProfile(t *testing.T) {
 
 	if got := args[len(args)-1]; got != "/work/out/720/playlist.m3u8" {
 		t.Errorf("output playlist = %q, want %q", got, "/work/out/720/playlist.m3u8")
+	}
+
+	if !slices.Contains(args, "-y") {
+		t.Errorf("arg list is missing -y\ngot: %v", args)
 	}
 }
 
