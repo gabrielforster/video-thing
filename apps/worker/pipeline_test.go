@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -27,6 +29,58 @@ func TestObjectKeyIsRelativeToTheOutputRoot(t *testing.T) {
 
 	if _, err := objectKey(id, "/tmp/work/out", "/etc/passwd"); err == nil {
 		t.Fatal("expected an error for a path outside the output root")
+	}
+}
+
+func TestRecordedKeysAreKeysThatGetUploaded(t *testing.T) {
+	id := uuid.MustParse("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+	out := newOutputPaths(t.TempDir())
+
+	for _, path := range []string{
+		out.playlist,
+		out.cover,
+		filepath.Join(out.root, renditionDir, "playlist.m3u8"),
+		filepath.Join(out.root, renditionDir, "segment_00000.ts"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir for %q: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %q: %v", path, err)
+		}
+	}
+
+	uploaded := map[string]bool{}
+	err := filepath.WalkDir(out.root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		key, err := objectKey(id, out.root, path)
+		if err != nil {
+			return err
+		}
+		uploaded[key] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the output tree: %v", err)
+	}
+
+	playlistKey, coverKey, err := out.keys(id)
+	if err != nil {
+		t.Fatalf("keys: %v", err)
+	}
+	for _, key := range []string{playlistKey, coverKey} {
+		if !uploaded[key] {
+			t.Errorf("recorded key %q is not among the uploaded keys %v", key, uploaded)
+		}
+	}
+
+	if want := "processed/" + id.String() + "/master.m3u8"; playlistKey != want {
+		t.Errorf("playlist key = %q, want %q", playlistKey, want)
+	}
+	if want := "processed/" + id.String() + "/thumbnails/cover.jpg"; coverKey != want {
+		t.Errorf("cover key = %q, want %q", coverKey, want)
 	}
 }
 

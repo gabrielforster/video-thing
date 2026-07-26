@@ -49,6 +49,30 @@ func objectKey(videoID uuid.UUID, root, path string) (string, error) {
 	return "processed/" + videoID.String() + "/" + filepath.ToSlash(rel), nil
 }
 
+type outputPaths struct {
+	root     string
+	playlist string
+	cover    string
+}
+
+func newOutputPaths(root string) outputPaths {
+	return outputPaths{
+		root:     root,
+		playlist: filepath.Join(root, "master.m3u8"),
+		cover:    filepath.Join(root, "thumbnails", "cover.jpg"),
+	}
+}
+
+func (o outputPaths) keys(videoID uuid.UUID) (playlist, cover string, err error) {
+	if playlist, err = objectKey(videoID, o.root, o.playlist); err != nil {
+		return "", "", err
+	}
+	if cover, err = objectKey(videoID, o.root, o.cover); err != nil {
+		return "", "", err
+	}
+	return playlist, cover, nil
+}
+
 func contentTypeFor(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".m3u8":
@@ -83,33 +107,35 @@ func (p *pipeline) process(ctx context.Context, job uploadedObject) error {
 		return err
 	}
 
-	out := filepath.Join(work, "out")
-	if err := os.MkdirAll(filepath.Join(out, renditionDir), 0o755); err != nil {
+	out := newOutputPaths(filepath.Join(work, "out"))
+	if err := os.MkdirAll(filepath.Join(out.root, renditionDir), 0o755); err != nil {
 		return fmt.Errorf("output dir: %w", err)
 	}
-	if err := run(ctx, "ffmpeg", transcodeArgs(source, out)); err != nil {
+	if err := run(ctx, "ffmpeg", transcodeArgs(source, out.root)); err != nil {
 		return fmt.Errorf("transcode: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(out, "master.m3u8"), []byte(masterPlaylist()), 0o644); err != nil {
+	if err := os.WriteFile(out.playlist, []byte(masterPlaylist()), 0o644); err != nil {
 		return fmt.Errorf("write master playlist: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Join(out, "thumbnails"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(out.cover), 0o755); err != nil {
 		return fmt.Errorf("thumbnail dir: %w", err)
 	}
-	cover := filepath.Join(out, "thumbnails", "cover.jpg")
-	if err := run(ctx, "ffmpeg", coverArgs(source, cover, probe.Duration)); err != nil {
+	if err := run(ctx, "ffmpeg", coverArgs(source, out.cover, probe.Duration)); err != nil {
 		return fmt.Errorf("cover: %w", err)
 	}
 
-	if err := p.uploadTree(ctx, job.VideoID, out); err != nil {
+	playlistKey, coverKey, err := out.keys(job.VideoID)
+	if err != nil {
+		return fmt.Errorf("object keys: %w", err)
+	}
+
+	if err := p.uploadTree(ctx, job.VideoID, out.root); err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
 
 	size := job.Size
-	playlistKey := "processed/" + job.VideoID.String() + "/master.m3u8"
-	coverKey := "processed/" + job.VideoID.String() + "/thumbnails/cover.jpg"
 	duration, width, height := probe.Duration, probe.Width, probe.Height
 
 	if _, err := p.store.MarkReady(ctx, db.MarkReadyParams{
