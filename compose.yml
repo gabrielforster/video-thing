@@ -22,3 +22,13 @@ services:
 
 volumes:
   postgres-data:
+
+networks:
+  # Pinned because the host's default Docker bridge pool (172.17-172.31/16)
+  # is fully consumed by ~30 unrelated pre-existing project networks, so
+  # `docker compose up` fails with address-pool exhaustion. 10.89.0.0/24 was
+  # verified free on this host at the time this was added.
+  default:
+    ipam:
+      config:
+        - subnet: 10.89.0.0/24
