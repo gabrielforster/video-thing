@@ -26,27 +26,75 @@ func TestParseProbe(t *testing.T) {
 }
 
 func TestParseProbeRejectsSourceWithoutVideoStream(t *testing.T) {
-	if _, err := parseProbe([]byte(`{"streams":[],"format":{"duration":"1.0"}}`)); err == nil {
-		t.Fatal("expected an error when no video stream is present")
+	for _, tc := range []struct {
+		name   string
+		stdout string
+	}{
+		{"no streams", `{"streams":[],"format":{"duration":"1.0"}}`},
+		{"stream without dimensions", `{"streams":[{"codec_name":"h264","width":0,"height":0}],"format":{"duration":"1.0"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseProbe([]byte(tc.stdout)); err == nil {
+				t.Fatal("expected an error when no video stream is present")
+			}
+		})
 	}
 }
 
-func TestTranscodeArgsMatchProfile(t *testing.T) {
-	args := strings.Join(transcodeArgs("/work/source.mp4", "/work/out"), " ")
+func TestParseProbeRejectsUnparseableDuration(t *testing.T) {
+	stdout := `{"streams":[{"width":1920,"height":1080}],"format":{"duration":"N/A"}}`
+	if _, err := parseProbe([]byte(stdout)); err == nil {
+		t.Fatal("expected an error when the duration is not a number")
+	}
+}
 
-	for _, want := range []string{
-		"scale=1280:720:force_original_aspect_ratio=decrease",
-		"-profile:v main", "-level:v 3.1",
-		"-b:v 2800k", "-maxrate 3000k", "-bufsize 6000k",
-		"keyint=180:min-keyint=180:scenecut=0:open-gop=0",
-		"-b:a 128k", "-ar 48000", "-ac 2",
-		"-hls_time 6", "-hls_playlist_type vod", "-hls_flags independent_segments",
-		"/work/out/720/segment_%05d.ts",
-		"/work/out/720/playlist.m3u8",
-	} {
-		if !strings.Contains(args, want) {
-			t.Errorf("transcode args missing %q\ngot: %s", want, args)
+func argValue(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	for i, arg := range args {
+		if arg != flag {
+			continue
 		}
+		if i+1 >= len(args) {
+			t.Fatalf("flag %q is last in the arg list, so it has no value\ngot: %v", flag, args)
+		}
+		return args[i+1]
+	}
+	t.Fatalf("arg list is missing flag %q\ngot: %v", flag, args)
+	return ""
+}
+
+func TestTranscodeArgsMatchProfile(t *testing.T) {
+	args := transcodeArgs("/work/source.mp4", "/work/out")
+
+	for flag, want := range map[string]string{
+		"-i":                    "/work/source.mp4",
+		"-vf":                   "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+		"-c:v":                  "libx264",
+		"-profile:v":            "main",
+		"-level:v":              "3.1",
+		"-b:v":                  "2800k",
+		"-maxrate":              "3000k",
+		"-bufsize":              "6000k",
+		"-r":                    "30",
+		"-x264-params":          "keyint=180:min-keyint=180:scenecut=0:open-gop=0",
+		"-c:a":                  "aac",
+		"-profile:a":            "aac_low",
+		"-b:a":                  "128k",
+		"-ar":                   "48000",
+		"-ac":                   "2",
+		"-f":                    "hls",
+		"-hls_time":             "6",
+		"-hls_playlist_type":    "vod",
+		"-hls_flags":            "independent_segments",
+		"-hls_segment_filename": "/work/out/720/segment_%05d.ts",
+	} {
+		if got := argValue(t, args, flag); got != want {
+			t.Errorf("%s = %q, want %q", flag, got, want)
+		}
+	}
+
+	if got := args[len(args)-1]; got != "/work/out/720/playlist.m3u8" {
+		t.Errorf("output playlist = %q, want %q", got, "/work/out/720/playlist.m3u8")
 	}
 }
 
