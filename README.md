@@ -6,7 +6,7 @@ Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver 
 
 ## Run it locally
 
-Requires Docker, Go 1.23+, Node 20+, ffmpeg, awscli, jq, and golang-migrate.
+Requires Docker, Go 1.25+ (the module targets 1.25.5), Node 20+, ffmpeg, awscli, jq, and golang-migrate.
 
 ```bash
 docker compose up -d
@@ -54,7 +54,8 @@ terraform plan
 docs/
     architecture/       C4 model, sequence diagrams
     decisions/           ADRs
-    specifications/       spec, OpenAPI, DB schema, migrations, FFmpeg profiles
+    specifications/       specs, OpenAPI, DB schema, FFmpeg profiles
+    plans/                implementation plans
 infrastructure/
     terraform/
         modules/          11 reusable modules
@@ -65,6 +66,7 @@ apps/
     web/                Vite/React upload page with hls.js playback
 packages/
     database/           sqlc-generated queries + golang-migrate migrations
+                        (migrations/, queries.sql, sqlc.yaml, db/)
 scripts/
     e2e.sh              cold-stack end-to-end proof (see "Run it locally")
 ```

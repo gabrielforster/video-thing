@@ -140,6 +140,7 @@ Sample output the worker parses (fields it acts on: `width`/`height` for §3's r
 ffmpeg -y -i /work/source.mp4 \
   -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2" \
   -c:v libx264 \
+  -pix_fmt yuv420p \
   -profile:v main -level:v 3.1 \
   -b:v 2800k -maxrate 3000k -bufsize 6000k \
   -r 30 \
@@ -156,6 +157,7 @@ ffmpeg -y -i /work/source.mp4 \
 Command notes:
 
 - `scale=...force_original_aspect_ratio=decrease,pad=...` guarantees exact target dimensions without distorting aspect ratio, letterboxing instead of stretching non-16:9 sources.
+- `-pix_fmt yuv420p` is mandatory on **every** rendition, not a stylistic default. The `-profile:v` values in §2 (baseline/main/high, all 8-bit 4:2:0) cannot represent a 4:2:2, 4:4:4, or 10-bit source, and libx264 refuses the encode outright rather than converting on its own — so without this flag ProRes, many screen recorders, HDR phone captures, and ffmpeg's own `testsrc` (yuv444p) all fail to transcode. Chroma subsampling is also what HLS clients universally decode; 4:2:0 is the target regardless of the source. Note that this failure is a property of the *input*, so per §7 it would be retried three times before reaching a terminal status for no benefit — another reason it belongs in the command rather than in the retry policy.
 - `-x264-params keyint=180:min-keyint=180:scenecut=0:open-gop=0` is the concrete mechanism behind §4's closed-GOP requirement: `keyint`/`min-keyint` fix GOP length to exactly `hls_time × fps` (here 6×30=180) with no variance, `scenecut=0` disables x264's adaptive keyframe insertion on scene cuts (which would otherwise break the fixed-GOP/segment alignment), and `open-gop=0` forces closed GOPs so each GOP decodes independently of neighboring ones — required for clean segment-boundary switching.
 - `-hls_flags independent_segments` sets `#EXT-X-INDEPENDENT-SEGMENTS` in the playlist, asserting to the player that every segment can be decoded without any other segment — true here specifically because of the closed-GOP encode above.
 - The 1080p/480p/360p invocations are byte-identical in structure; only `-vf scale=...`, `-profile:v`/`-level:v`, `-b:v`/`-maxrate`/`-bufsize`, `-b:a`, and the output path components change, per the §2 table. `keyint`/`min-keyint` stay at 180 (6s × 30fps) for every rendition so GOP boundaries line up across renditions per §4, even though bitrate/resolution differ.

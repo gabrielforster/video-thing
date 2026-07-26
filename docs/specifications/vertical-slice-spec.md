@@ -104,13 +104,13 @@ The event body is decoded into a hand-written struct of about fifteen lines. Dep
 
 The message is deleted only after the database write commits. A crash at any earlier point causes redelivery, which is what makes at-least-once delivery safe here. A redelivered job overwrites the same S3 keys and rewrites the same row, so re-running is idempotent.
 
-**Failure handling.** A transient failure — S3 timeout, ffmpeg crash, database unavailable — is logged and the message is left undeleted, so the visibility timeout redelivers it. When `ApproximateReceiveCount` reaches 3, the worker stops retrying: it sets `status = failed` with `error_message` and deletes the message, so a permanently broken input cannot occupy the queue indefinitely. DLQ wiring is deferred; this in-process ceiling covers the slice.
+**Failure handling.** A transient failure — S3 timeout, ffmpeg crash, database unavailable — is logged and the message is left undeleted, so the visibility timeout redelivers it. When `ApproximateReceiveCount` reaches 3, the worker stops retrying: it sets `status = failed` with `error_message` and deletes the message, so a permanently broken input cannot occupy the queue indefinitely. A failure that is a property of the input, per [ffmpeg-profiles.md §7](ffmpeg-profiles.md#7-failure-handling), short-circuits that ceiling and fails the record on the first attempt. An object at `raw/{uuid}` with no matching row is one of those: the row will never appear, and since there is nothing to record the failure on, the message is discarded rather than redelivered forever. The visibility timeout is 120 seconds — comfortably above one job, and low enough that the three-attempt ceiling is reached in minutes rather than the better part of an hour. DLQ wiring is deferred; this in-process ceiling covers the slice.
 
 ## 7. Web Application
 
 One page, built with Vite, TypeScript, Tailwind, and shadcn/ui. No router and no data-fetching library — there is one route and one resource.
 
-Flow: select a file → `POST /videos` → upload to the presigned URL → `POST /videos/{id}/complete` → poll `GET /videos/{id}` every 2 seconds → on `ready`, mount hls.js against `master_playlist`; on `failed`, render the error.
+Flow: select a file → `POST /videos` → upload to the presigned URL → start polling `GET /videos/{id}` every 2 seconds → on `ready`, mount hls.js against `master_playlist`; on `failed`, render the error. `POST /videos/{id}/complete` is fired once polling has started and its failure is swallowed: the worker races that call and correctly answers `409` when it advanced the row first, and treating that as an upload error would strand the page and invite a duplicate upload of a video that is already processing.
 
 The upload uses `XMLHttpRequest` rather than `fetch`, because `fetch` exposes no upload progress events and the page shows a progress bar. Polling is chosen over Server-Sent Events: a 2-second poll against a single record is a few lines and no server-side connection state. SSE arrives if the dashboard ever needs to watch many records at once.
 
@@ -130,9 +130,9 @@ Locally that base is `http://localhost:4566/video-thing-dev-processed-assets`. I
 
 **Go — tests written before the code they cover:** S3 event decoding and video-ID extraction, including the poison-key path; FFmpeg argument construction; `master.m3u8` assembly; and the status-transition rules behind the `409`. The sqlc query tests run against the compose Postgres and call `t.Skip` when `DATABASE_URL` is unset, so `go test ./...` stays green without Docker running.
 
-**Web:** vitest with React Testing Library. Two tests: the upload happy path, with `XMLHttpRequest` and `fetch` mocked, asserting the call order and that the player mounts once the polled status reaches `ready`; and the `failed` status rendering its error state.
+**Web:** vitest with React Testing Library, with `XMLHttpRequest` and `fetch` mocked: the upload happy path, asserting the call order and that the player mounts once the polled status reaches `ready`; a rejected `POST /complete` still reaching `ready` and mounting the player, since that call is optional; a transient poll failure being retired by the next successful poll; and the `failed` status rendering its error state.
 
-**End-to-end:** `scripts/e2e.sh` generates a 5-second `testsrc` clip with ffmpeg, drives the full pipeline against the local stack, and asserts that `processed/{id}/master.m3u8` exists in the processed bucket and that the record reached `ready`.
+**End-to-end:** `scripts/e2e.sh` generates a 10-second `testsrc` clip with ffmpeg (long enough to produce more than one 6-second segment, and deliberately left at testsrc's native yuv444p so the worker's own pixel-format conforming is what is under test), drives the full pipeline against the local stack, and asserts that the record reached `ready`, that `processed/{id}/master.m3u8` and the rest of the asset set exist and are nonempty, that the API's `master_playlist` URL is exactly `PUBLIC_ASSET_BASE_URL` plus the key the worker wrote, that the same URL is readable unsigned and cross-origin the way hls.js reads it, and that `POST /videos/{id}/complete` returns `200` once and `409 invalid_state_transition` on a repeat.
 
 ## 11. Done When
 
@@ -141,5 +141,5 @@ Locally that base is `http://localhost:4566/video-thing-dev-processed-assets`. I
 * `processed/{id}/` contains `master.m3u8`, the 720p variant playlist, its segments, and `thumbnails/cover.jpg`.
 * The page plays the result through hls.js.
 * A worker killed mid-transcode reprocesses the video on redelivery and still reaches `ready`.
-* An unprocessable input reaches `status = failed` with an `error_message` after three attempts.
+* An unprocessable input reaches `status = failed` with an `error_message`: on the first attempt when the failure is a property of the file (ffprobe rejects it, or an orphan object has no row), and after three attempts when the failure looked transient.
 * `scripts/e2e.sh` passes from a cold `docker compose up`.
