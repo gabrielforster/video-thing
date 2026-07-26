@@ -9,16 +9,40 @@ Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver 
 Requires Docker, Go 1.25+ (the module targets 1.25.5), Node 20+, ffmpeg, awscli, jq, and golang-migrate.
 
 ```bash
-docker compose up -d
-make migrate-up
-./scripts/e2e.sh        # one-shot proof the whole pipeline works
+make up          # compose stack, wait for Postgres + SQS, run migrations
+make e2e         # one-shot proof the whole pipeline works
 ```
 
-To drive it by hand, see the environment blocks in
-[docs/plans/vertical-slice-plan.md](docs/plans/vertical-slice-plan.md) — the API
-needs `DATABASE_URL`, `RAW_BUCKET`, `AWS_ENDPOINT_URL`, `PUBLIC_ASSET_BASE_URL`;
-the worker needs `DATABASE_URL`, `QUEUE_URL`, `PROCESSED_BUCKET`,
-`AWS_ENDPOINT_URL`. Then `cd apps/web && npm run dev`.
+To drive it from the browser, run the three services in three terminals:
+
+```bash
+make api         # :8080
+make worker      # derives the LocalStack queue URL itself
+make web         # :5173
+```
+
+The Makefile exports the local defaults every target needs (`DATABASE_URL`,
+`AWS_ENDPOINT_URL`, the two bucket names, `PUBLIC_ASSET_BASE_URL`, `PORT`);
+override any of them on the command line, e.g. `make api PORT=9090`. The web app
+reads `VITE_API_URL`, defaulting to `http://localhost:8080`.
+
+Without a browser, the same flow is four calls — note the upload URL comes back
+as `upload.uploadUrl`, and the `Content-Type` must match the header the API
+returns, since it is signed into the URL:
+
+```bash
+ID_AND_URL=$(curl -s -X POST localhost:8080/videos \
+  -H 'content-type: application/json' -d '{"title":"manual test"}' \
+  | jq -r '.video.id, .upload.uploadUrl')
+ID=$(echo "$ID_AND_URL" | head -1); URL=$(echo "$ID_AND_URL" | tail -1)
+curl -s -X PUT --upload-file clip.mp4 -H 'content-type: application/octet-stream' "$URL"
+curl -s -X POST "localhost:8080/videos/$ID/complete"   # optional; the S3 event drives processing
+curl -s "localhost:8080/videos/$ID" | jq              # poll until status is "ready"
+```
+
+`make down` stops the stack. It keeps the Postgres volume, so `make up` is
+resumable; LocalStack is in-memory, so a restart re-runs the init script and
+drops any previously uploaded objects.
 
 ## Start here
 
