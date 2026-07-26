@@ -2,7 +2,23 @@
 
 Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver via CDN. Event-driven, horizontally scalable, deployed on AWS via Terraform.
 
-**Status:** design phase. Architecture, infrastructure, and API contract are specified and the Terraform module tree is implemented and `terraform validate`-clean. Application code (`apps/api`, `apps/worker`, `apps/web`) is not written yet.
+**Status:** vertical slice implemented. `apps/api`, `apps/worker`, and `apps/web` run locally against LocalStack (S3 + SQS) and Postgres: a browser can upload a file, the worker transcodes it to 720p HLS with a thumbnail, and the page plays it back. `scripts/e2e.sh` proves the pipeline end to end from a cold stack. The full rendition ladder (only 720p exists today), deletion, listing, CloudFront, and deployment to AWS remain unbuilt — architecture, infrastructure, and API contract for that fuller scope are specified and the Terraform module tree is implemented and `terraform validate`-clean.
+
+## Run it locally
+
+Requires Docker, Go 1.23+, Node 20+, ffmpeg, awscli, jq, and golang-migrate.
+
+```bash
+docker compose up -d
+make migrate-up
+./scripts/e2e.sh        # one-shot proof the whole pipeline works
+```
+
+To drive it by hand, see the environment blocks in
+[docs/plans/vertical-slice-plan.md](docs/plans/vertical-slice-plan.md) — the API
+needs `DATABASE_URL`, `RAW_BUCKET`, `AWS_ENDPOINT_URL`, `PUBLIC_ASSET_BASE_URL`;
+the worker needs `DATABASE_URL`, `QUEUE_URL`, `PROCESSED_BUCKET`,
+`AWS_ENDPOINT_URL`. Then `cd apps/web && npm run dev`.
 
 ## Start here
 
@@ -43,6 +59,14 @@ infrastructure/
     terraform/
         modules/          11 reusable modules
         environments/      dev (implemented), staging/production (reserved)
-apps/                     not yet implemented — api, worker, web
-packages/                 not yet implemented — database, contracts, shared
+apps/
+    api/                Gin service: presigned uploads, video CRUD, health/readiness
+    worker/             SQS consumer: ffmpeg transcode to 720p HLS, thumbnails, DB updates
+    web/                Vite/React upload page with hls.js playback
+packages/
+    database/           sqlc-generated queries + golang-migrate migrations
+scripts/
+    e2e.sh              cold-stack end-to-end proof (see "Run it locally")
 ```
+
+`packages/contracts` and `packages/shared` from the original design were deliberately not created — the vertical slice turned out not to need a separate generated-types package or a shared-code package; `apps/api` and `apps/worker` each import `packages/database` directly.
