@@ -236,19 +236,28 @@ if ! grep -q '720/playlist\.m3u8' "$TMP/master.m3u8"; then
     exit 1
 fi
 
-MASTER_URL="$(curl -sf "localhost:$PORT/videos/$ID" | jq -r .master_playlist)"
+MASTER_URL="$(curl -sf "localhost:$PORT/videos/$ID" 2>/dev/null | jq -r .master_playlist 2>/dev/null || true)"
+if [ -z "$MASTER_URL" ] || [ "$MASTER_URL" = "null" ]; then
+    echo "FAIL: could not fetch master_playlist for video $ID from the API" >&2
+    exit 1
+fi
 if [ "$MASTER_URL" != "$PUBLIC_ASSET_BASE_URL/$MASTER_KEY" ]; then
     echo "FAIL: master_playlist = $MASTER_URL, want $PUBLIC_ASSET_BASE_URL/$MASTER_KEY" >&2
     exit 1
 fi
 
-if ! curl -sf -H 'Origin: http://localhost:5173' "$MASTER_URL" -o "$TMP/master-public.m3u8"; then
+if ! curl -sf -D "$TMP/master-public.headers" -H 'Origin: http://localhost:5173' "$MASTER_URL" -o "$TMP/master-public.m3u8"; then
     echo "FAIL: unsigned cross-origin GET of $MASTER_URL failed" >&2
     exit 1
 fi
 if ! head -n 1 "$TMP/master-public.m3u8" | grep -q '^#EXTM3U'; then
     echo "FAIL: unsigned GET of $MASTER_URL did not return a playlist:" >&2
     head -n 5 "$TMP/master-public.m3u8" >&2
+    exit 1
+fi
+if ! grep -qi '^access-control-allow-origin:' "$TMP/master-public.headers"; then
+    echo "FAIL: unsigned GET of $MASTER_URL had no access-control-allow-origin header (CORS not applied):" >&2
+    cat "$TMP/master-public.headers" >&2
     exit 1
 fi
 
