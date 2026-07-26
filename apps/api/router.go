@@ -31,10 +31,16 @@ func newRouter(h *handlers, ping func(context.Context) error) *gin.Engine {
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/readyz", func(c *gin.Context) {
 		if err := ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "unavailable",
+				"checks": gin.H{"database": "unreachable"},
+			})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+			"checks": gin.H{"database": "ok"},
+		})
 	})
 
 	return r

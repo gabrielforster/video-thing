@@ -6,10 +6,19 @@ RETURNING *;
 -- name: GetVideo :one
 SELECT * FROM videos WHERE id = $1;
 
+-- name: GetVideoForUpdate :one
+SELECT * FROM videos WHERE id = $1 FOR UPDATE;
+
 -- name: MarkProcessing :one
 UPDATE videos
 SET status = 'processing'
 WHERE id = $1
+RETURNING *;
+
+-- name: MarkProcessingFromUploading :one
+UPDATE videos
+SET status = 'processing'
+WHERE id = $1 AND status = 'uploading'
 RETURNING *;
 
 -- name: MarkReady :one

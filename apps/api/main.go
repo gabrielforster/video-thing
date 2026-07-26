@@ -10,8 +10,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/gabrielforster/video-thing/packages/database/db"
 )
 
 func main() {
@@ -41,7 +39,7 @@ func main() {
 		}
 	})
 
-	h := newHandlers(db.New(pool), NewPresigner(s3Client, cfg.RawBucket, 15*time.Minute),
+	h := newHandlers(newPGStore(pool), NewPresigner(s3Client, cfg.RawBucket, 15*time.Minute),
 		cfg.RawBucket, cfg.PublicAssetBaseURL)
 
 	r := newRouter(h, func(ctx context.Context) error {

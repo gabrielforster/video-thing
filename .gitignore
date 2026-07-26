@@ -5,3 +5,7 @@
 !*.tfvars.example
 crash.log
 crash.*.log
+
+# Binaries left in the repo root by `go build ./apps/...`
+/api
+/worker

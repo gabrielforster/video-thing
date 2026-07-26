@@ -77,6 +77,34 @@ func (q *Queries) GetVideo(ctx context.Context, id uuid.UUID) (Video, error) {
 	return i, err
 }
 
+const getVideoForUpdate = `-- name: GetVideoForUpdate :one
+SELECT id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at FROM videos WHERE id = $1 FOR UPDATE
+`
+
+// Locks the row for the caller's transaction so a concurrent guarded
+// transition cannot interleave between the read and the write.
+func (q *Queries) GetVideoForUpdate(ctx context.Context, id uuid.UUID) (Video, error) {
+	row := q.db.QueryRow(ctx, getVideoForUpdate, id)
+	var i Video
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Status,
+		&i.Duration,
+		&i.Width,
+		&i.Height,
+		&i.SizeBytes,
+		&i.MasterPlaylist,
+		&i.Thumbnail,
+		&i.SourceBucket,
+		&i.SourceKey,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markFailed = `-- name: MarkFailed :one
 UPDATE videos
 SET status = 'failed', error_message = $2
@@ -118,8 +146,41 @@ WHERE id = $1
 RETURNING id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at
 `
 
+// Unguarded on purpose: the worker calls this on SQS redelivery, when the row
+// may already be 'processing'. The API uses MarkProcessingFromUploading.
 func (q *Queries) MarkProcessing(ctx context.Context, id uuid.UUID) (Video, error) {
 	row := q.db.QueryRow(ctx, markProcessing, id)
+	var i Video
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Status,
+		&i.Duration,
+		&i.Width,
+		&i.Height,
+		&i.SizeBytes,
+		&i.MasterPlaylist,
+		&i.Thumbnail,
+		&i.SourceBucket,
+		&i.SourceKey,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markProcessingFromUploading = `-- name: MarkProcessingFromUploading :one
+UPDATE videos
+SET status = 'processing'
+WHERE id = $1 AND status = 'uploading'
+RETURNING id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at
+`
+
+// Guarded transition for the API's complete endpoint: matches no row unless
+// the video is still 'uploading', so exactly one concurrent caller wins.
+func (q *Queries) MarkProcessingFromUploading(ctx context.Context, id uuid.UUID) (Video, error) {
+	row := q.db.QueryRow(ctx, markProcessingFromUploading, id)
 	var i Video
 	err := row.Scan(
 		&i.ID,

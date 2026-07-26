@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,10 +53,13 @@ func (f *fakeStore) GetVideo(_ context.Context, id uuid.UUID) (db.Video, error) 
 	return v, nil
 }
 
-func (f *fakeStore) MarkProcessing(_ context.Context, id uuid.UUID) (db.Video, error) {
+func (f *fakeStore) CompleteUpload(_ context.Context, id uuid.UUID) (db.Video, error) {
 	v, ok := f.videos[id]
 	if !ok {
 		return db.Video{}, pgx.ErrNoRows
+	}
+	if v.Status != db.VideoStatusUploading {
+		return db.Video{}, errNotUploading
 	}
 	v.Status = db.VideoStatusProcessing
 	f.videos[id] = v
@@ -64,10 +68,15 @@ func (f *fakeStore) MarkProcessing(_ context.Context, id uuid.UUID) (db.Video, e
 
 func testRouter(t *testing.T, s store) *gin.Engine {
 	t.Helper()
+	return testRouterWithPing(t, s, func(context.Context) error { return nil })
+}
+
+func testRouterWithPing(t *testing.T, s store, ping func(context.Context) error) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	h := newHandlers(s, NewPresigner(testS3Client(t), "video-thing-dev-raw-uploads", 15*time.Minute),
 		"video-thing-dev-raw-uploads", "http://localhost:4566/video-thing-dev-processed-assets")
-	return newRouter(h, func(context.Context) error { return nil })
+	return newRouter(h, ping)
 }
 
 func do(t *testing.T, r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
@@ -218,9 +227,59 @@ func TestCompleteConflictsWhenNotUploading(t *testing.T) {
 	}
 }
 
+func TestCompleteNotFound(t *testing.T) {
+	rec := do(t, testRouter(t, newFakeStore()), http.MethodPost, "/videos/"+uuid.New().String()+"/complete", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	rec := do(t, testRouter(t, newFakeStore()), http.MethodGet, "/healthz", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+type readinessBody struct {
+	Status string `json:"status"`
+	Checks struct {
+		Database string `json:"database"`
+	} `json:"checks"`
+}
+
+func TestReadyzReportsDatabaseOK(t *testing.T) {
+	r := testRouterWithPing(t, newFakeStore(), func(context.Context) error { return nil })
+	rec := do(t, r, http.MethodGet, "/readyz", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var got readinessBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != "ok" {
+		t.Fatalf("status = %q, want ok", got.Status)
+	}
+	if got.Checks.Database != "ok" {
+		t.Fatalf("checks.database = %q, want ok", got.Checks.Database)
+	}
+}
+
+func TestReadyzReportsDatabaseUnreachable(t *testing.T) {
+	r := testRouterWithPing(t, newFakeStore(), func(context.Context) error { return errors.New("ping failed") })
+	rec := do(t, r, http.MethodGet, "/readyz", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	var got readinessBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != "unavailable" {
+		t.Fatalf("status = %q, want unavailable", got.Status)
+	}
+	if got.Checks.Database != "unreachable" {
+		t.Fatalf("checks.database = %q, want unreachable", got.Checks.Database)
 	}
 }

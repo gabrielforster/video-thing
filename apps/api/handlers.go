@@ -16,7 +16,7 @@ import (
 type store interface {
 	CreateVideo(ctx context.Context, arg db.CreateVideoParams) (db.Video, error)
 	GetVideo(ctx context.Context, id uuid.UUID) (db.Video, error)
-	MarkProcessing(ctx context.Context, id uuid.UUID) (db.Video, error)
+	CompleteUpload(ctx context.Context, id uuid.UUID) (db.Video, error)
 }
 
 type handlers struct {
@@ -146,25 +146,16 @@ func (h *handlers) completeUpload(c *gin.Context) {
 		return
 	}
 
-	current, err := h.store.GetVideo(c.Request.Context(), id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	updated, err := h.store.CompleteUpload(c.Request.Context(), id)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
 		fail(c, http.StatusNotFound, "not_found", "video not found")
-		return
-	}
-	if err != nil {
-		fail(c, http.StatusInternalServerError, "internal_error", "could not read video")
-		return
-	}
-	if current.Status != db.VideoStatusUploading {
+	case errors.Is(err, errNotUploading):
 		fail(c, http.StatusConflict, "invalid_state_transition",
 			"Video "+id.String()+" is not in the 'uploading' state and cannot be marked as processing.")
-		return
-	}
-
-	updated, err := h.store.MarkProcessing(c.Request.Context(), id)
-	if err != nil {
+	case err != nil:
 		fail(c, http.StatusInternalServerError, "internal_error", "could not update video")
-		return
+	default:
+		c.JSON(http.StatusOK, h.toJSON(updated))
 	}
-	c.JSON(http.StatusOK, h.toJSON(updated))
 }
