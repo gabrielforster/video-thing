@@ -25,6 +25,29 @@ if [ ! -x "$MIGRATE" ]; then
     exit 1
 fi
 
+queue_depth() {
+    aws --endpoint-url "$AWS_ENDPOINT_URL" sqs get-queue-attributes \
+        --queue-url "$QUEUE_URL" \
+        --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible \
+        --query 'Attributes.[ApproximateNumberOfMessages,ApproximateNumberOfMessagesNotVisible]' \
+        --output text 2>/dev/null || true
+}
+
+require_nonempty_object() {
+    local key="$1" label="$2" len
+    len="$(aws --endpoint-url "$AWS_ENDPOINT_URL" s3api head-object \
+        --bucket "$PROCESSED_BUCKET" --key "$key" --query ContentLength --output text 2>/dev/null || true)"
+    if [ -z "$len" ] || [ "$len" = "None" ]; then
+        echo "FAIL: $label is missing from $PROCESSED_BUCKET ($key)" >&2
+        exit 1
+    fi
+    if [ "$len" -le 0 ]; then
+        echo "FAIL: $label exists but is zero-length ($key)" >&2
+        exit 1
+    fi
+    echo "$len"
+}
+
 TMP="$(mktemp -d)"
 PIDS=()
 cleanup() {
@@ -85,7 +108,7 @@ echo "==> building and starting services"
 go build -o "$TMP/api" ./apps/api
 go build -o "$TMP/worker" ./apps/worker
 "$TMP/api" >"$TMP/api.log" 2>&1 & PIDS+=($!)
-"$TMP/worker" >"$TMP/worker.log" 2>&1 & PIDS+=($!)
+"$TMP/worker" >"$TMP/worker.log" 2>&1 & WORKER_PID=$!; PIDS+=("$WORKER_PID")
 
 for attempt in $(seq 1 30); do
     curl -sf "localhost:$PORT/healthz" >/dev/null && break
@@ -110,7 +133,7 @@ for upload_attempt in $(seq 1 "$UPLOAD_ATTEMPTS"); do
     echo "==> waiting for processing (video $ID)"
     STATUS=""
     for attempt in $(seq 1 60); do
-        STATUS="$(curl -sf "localhost:$PORT/videos/$ID" | jq -r .status)"
+        STATUS="$(curl -sf "localhost:$PORT/videos/$ID" 2>/dev/null | jq -r .status 2>/dev/null || true)"
         [ "$STATUS" = "ready" ] && break
         if [ "$STATUS" = "failed" ]; then
             echo "FAIL: processing reported failed" >&2
@@ -120,7 +143,49 @@ for upload_attempt in $(seq 1 "$UPLOAD_ATTEMPTS"); do
     done
 
     [ "$STATUS" = "ready" ] && break
-    echo "video $ID timed out with status=$STATUS (possible LocalStack notification loss); $([ "$upload_attempt" -lt "$UPLOAD_ATTEMPTS" ] && echo "retrying with a new upload" || echo "no attempts left")" >&2
+
+    VISIBLE=""; INFLIGHT=""
+    read -r VISIBLE INFLIGHT <<<"$(queue_depth)" || true
+    VISIBLE="${VISIBLE:-unknown}"; INFLIGHT="${INFLIGHT:-unknown}"
+
+    if grep -q "processing video $ID" "$TMP/worker.log" 2>/dev/null; then
+        echo "FAIL: video $ID timed out with status=$STATUS, but the worker DID receive it" >&2
+        echo "      (worker.log has a 'processing video $ID' line). Delivery worked and" >&2
+        echo "      processing never completed, so this is a pipeline failure, not a" >&2
+        echo "      delivery artifact. Refusing to retry -- investigate the worker." >&2
+        exit 1
+    fi
+
+    if ! kill -0 "$WORKER_PID" 2>/dev/null; then
+        echo "FAIL: the worker process ($WORKER_PID) is not running, which is why video $ID" >&2
+        echo "      was never picked up. That is a worker startup/crash failure, not a" >&2
+        echo "      delivery artifact. Refusing to retry." >&2
+        exit 1
+    fi
+
+    if [ "$VISIBLE" != "0" ]; then
+        echo "FAIL: video $ID timed out with status=$STATUS and $VISIBLE message(s) are sitting" >&2
+        echo "      visible on the queue while the worker is alive and polling. The event was" >&2
+        echo "      delivered and is not being consumed. Refusing to retry." >&2
+        exit 1
+    fi
+
+    echo "!! SUSPECTED LOCALSTACK S3->SQS DELIVERY ARTIFACT for video $ID" >&2
+    echo "!!   evidence: worker alive (pid $WORKER_PID), no receipt logged for this id," >&2
+    echo "!!   queue visible=$VISIBLE in-flight=$INFLIGHT -- the job never reached the" >&2
+    if [ "$INFLIGHT" != "0" ]; then
+        echo "!!   application, and the message is stranded in-flight (LocalStack returned it" >&2
+        echo "!!   from the queue without delivering it; it becomes visible again only after" >&2
+        echo "!!   the 900s visibility timeout, well past this script's wait)." >&2
+    else
+        echo "!!   application, and no message exists at all (notification never published)." >&2
+    fi
+    echo "!!   This is a LocalStack artifact, not an API/worker defect." >&2
+    if [ "$upload_attempt" -lt "$UPLOAD_ATTEMPTS" ]; then
+        echo "!!   retrying with a fresh upload (attempt $((upload_attempt + 1))/$UPLOAD_ATTEMPTS)" >&2
+    else
+        echo "!!   no attempts left" >&2
+    fi
 done
 
 if [ "$STATUS" != "ready" ]; then
@@ -129,14 +194,51 @@ if [ "$STATUS" != "ready" ]; then
 fi
 
 echo "==> asserting processed assets"
-aws --endpoint-url "$AWS_ENDPOINT_URL" s3api head-object \
-    --bucket "$PROCESSED_BUCKET" --key "processed/$ID/master.m3u8" >/dev/null
-aws --endpoint-url "$AWS_ENDPOINT_URL" s3api head-object \
-    --bucket "$PROCESSED_BUCKET" --key "processed/$ID/thumbnails/cover.jpg" >/dev/null
 
-SEGMENTS="$(aws --endpoint-url "$AWS_ENDPOINT_URL" s3api list-objects-v2 \
+MASTER_KEY="processed/$ID/master.m3u8"
+MASTER_LEN="$(require_nonempty_object "$MASTER_KEY" "master playlist")"
+aws --endpoint-url "$AWS_ENDPOINT_URL" s3api get-object \
+    --bucket "$PROCESSED_BUCKET" --key "$MASTER_KEY" "$TMP/master.m3u8" >/dev/null
+if ! head -n 1 "$TMP/master.m3u8" | grep -q '^#EXTM3U'; then
+    echo "FAIL: master playlist does not start with #EXTM3U ($MASTER_KEY):" >&2
+    head -n 5 "$TMP/master.m3u8" >&2
+    exit 1
+fi
+if ! grep -q '720/playlist\.m3u8' "$TMP/master.m3u8"; then
+    echo "FAIL: master playlist does not reference the 720p variant playlist ($MASTER_KEY):" >&2
+    cat "$TMP/master.m3u8" >&2
+    exit 1
+fi
+
+COVER_LEN="$(require_nonempty_object "processed/$ID/thumbnails/cover.jpg" "cover thumbnail")"
+
+RENDITION_PLAYLIST_LEN="$(require_nonempty_object "processed/$ID/720/playlist.m3u8" "720p rendition playlist")"
+
+aws --endpoint-url "$AWS_ENDPOINT_URL" s3api list-objects-v2 \
     --bucket "$PROCESSED_BUCKET" --prefix "processed/$ID/720/" \
-    --query 'length(Contents)' --output text)"
-[ "$SEGMENTS" -ge 2 ] || { echo "FAIL: only $SEGMENTS objects under 720/" >&2; exit 1; }
+    --query 'Contents[].[Key,Size]' --output text >"$TMP/rendition.txt"
 
-echo "PASS: video $ID reached ready with $SEGMENTS objects in the 720p rendition"
+SEGMENTS=0
+while IFS=$'\t' read -r key size; do
+    [ -n "$key" ] || continue
+    case "$key" in
+        */segment_*.ts)
+            if [ "${size:-0}" -le 0 ]; then
+                echo "FAIL: segment $key is zero-length" >&2
+                exit 1
+            fi
+            SEGMENTS=$((SEGMENTS + 1))
+            ;;
+    esac
+done <"$TMP/rendition.txt"
+
+if [ "$SEGMENTS" -lt 2 ]; then
+    echo "FAIL: expected at least 2 segment_*.ts objects under processed/$ID/720/, found $SEGMENTS" >&2
+    echo "objects actually present:" >&2
+    cat "$TMP/rendition.txt" >&2
+    exit 1
+fi
+
+echo "PASS: video $ID reached ready with a valid master playlist (${MASTER_LEN}B) referencing"
+echo "      the 720p rendition (playlist ${RENDITION_PLAYLIST_LEN}B, $SEGMENTS nonempty segments)"
+echo "      and a ${COVER_LEN}B cover thumbnail"
