@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/gabrielforster/video-thing/packages/database/db"
 )
@@ -88,6 +90,9 @@ func contentTypeFor(path string) string {
 
 func (p *pipeline) process(ctx context.Context, job uploadedObject) error {
 	if _, err := p.store.MarkProcessing(ctx, job.VideoID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return permanent("no video row for %s (orphan object %s/%s)", job.VideoID, job.Bucket, job.Key)
+		}
 		return fmt.Errorf("mark processing: %w", err)
 	}
 

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestObjectKeyIsRelativeToTheOutputRoot(t *testing.T) {
@@ -81,6 +84,19 @@ func TestRecordedKeysAreKeysThatGetUploaded(t *testing.T) {
 	}
 	if want := "processed/" + id.String() + "/thumbnails/cover.jpg"; coverKey != want {
 		t.Errorf("cover key = %q, want %q", coverKey, want)
+	}
+}
+
+func TestMarkProcessingWithNoRowIsPermanent(t *testing.T) {
+	p := &pipeline{store: &fakeWorkerStore{processingErr: pgx.ErrNoRows}}
+
+	err := p.process(context.Background(), uploadedObject{VideoID: uuid.MustParse(testVideoID)})
+	if err == nil {
+		t.Fatal("expected an error when the video row does not exist")
+	}
+	var perm *permanentError
+	if !errors.As(err, &perm) {
+		t.Fatalf("err = %v (%T), want a permanentError", err, err)
 	}
 }
 

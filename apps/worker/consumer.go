@@ -5,20 +5,35 @@ import (
 	"errors"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/gabrielforster/video-thing/packages/database/db"
 )
 
 const maxAttempts = 3
 
+const visibilityTimeoutSeconds = 120
+
+const receiveBackoff = 2 * time.Second
+
+type sqsAPI interface {
+	ReceiveMessage(context.Context, *sqs.ReceiveMessageInput, ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+}
+
+type processor interface {
+	process(ctx context.Context, job uploadedObject) error
+}
+
 type consumer struct {
-	sqs      *sqs.Client
+	sqs      sqsAPI
 	queueURL string
-	pipeline *pipeline
+	pipeline processor
 	store    workerStore
 }
 
@@ -32,7 +47,7 @@ func (c *consumer) run(ctx context.Context) error {
 			QueueUrl:            aws.String(c.queueURL),
 			MaxNumberOfMessages: 1,
 			WaitTimeSeconds:     20,
-			VisibilityTimeout:   900,
+			VisibilityTimeout:   visibilityTimeoutSeconds,
 			MessageSystemAttributeNames: []types.MessageSystemAttributeName{
 				types.MessageSystemAttributeNameApproximateReceiveCount,
 			},
@@ -42,6 +57,11 @@ func (c *consumer) run(ctx context.Context) error {
 				return ctx.Err()
 			}
 			log.Printf("receive: %v", err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(receiveBackoff):
+			}
 			continue
 		}
 
@@ -53,7 +73,7 @@ func (c *consumer) run(ctx context.Context) error {
 
 func (c *consumer) handle(ctx context.Context, msg types.Message) {
 	job, err := parseUpload(aws.ToString(msg.Body))
-	if errors.Is(err, errNotAnUpload) {
+	if err != nil {
 		log.Printf("discarding message: %v", err)
 		c.delete(ctx, msg)
 		return
@@ -72,6 +92,11 @@ func (c *consumer) handle(ctx context.Context, msg types.Message) {
 				ID:           job.VideoID,
 				ErrorMessage: &reason,
 			}); dbErr != nil {
+				if errors.Is(dbErr, pgx.ErrNoRows) {
+					log.Printf("video %s: no row to record the failure on, discarding the message", job.VideoID)
+					c.delete(ctx, msg)
+					return
+				}
 				log.Printf("video %s: could not record failure: %v", job.VideoID, dbErr)
 				return
 			}
@@ -89,8 +114,15 @@ func (c *consumer) handle(ctx context.Context, msg types.Message) {
 
 func receiveCount(msg types.Message) int {
 	raw := msg.Attributes[string(types.MessageSystemAttributeNameApproximateReceiveCount)]
+	if raw == "" {
+		log.Printf("WARNING: message has no ApproximateReceiveCount attribute; "+
+			"assuming attempt 1, so the %d-attempt retry ceiling cannot engage", maxAttempts)
+		return 1
+	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
+		log.Printf("WARNING: unparseable ApproximateReceiveCount %q: %v; "+
+			"assuming attempt 1, so the %d-attempt retry ceiling cannot engage", raw, err, maxAttempts)
 		return 1
 	}
 	return n

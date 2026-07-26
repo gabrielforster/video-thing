@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 
@@ -42,6 +43,11 @@ func parseUpload(body string) (uploadedObject, error) {
 	}
 	if len(event.Records) == 0 {
 		return uploadedObject{}, fmt.Errorf("%w: no records", errNotAnUpload)
+	}
+
+	if len(event.Records) > 1 {
+		log.Printf("event carries %d records; processing only the first (key %q)",
+			len(event.Records), event.Records[0].S3.Object.Key)
 	}
 
 	record := event.Records[0]
