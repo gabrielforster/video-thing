@@ -11,6 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const countVideos = `-- name: CountVideos :one
+SELECT COUNT(*) FROM videos
+`
+
+func (q *Queries) CountVideos(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countVideos)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createVideo = `-- name: CreateVideo :one
 INSERT INTO videos (id, title, source_bucket, source_key)
 VALUES ($1, $2, $3, $4)
@@ -31,6 +42,32 @@ func (q *Queries) CreateVideo(ctx context.Context, arg CreateVideoParams) (Video
 		arg.SourceBucket,
 		arg.SourceKey,
 	)
+	var i Video
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Status,
+		&i.Duration,
+		&i.Width,
+		&i.Height,
+		&i.SizeBytes,
+		&i.MasterPlaylist,
+		&i.Thumbnail,
+		&i.SourceBucket,
+		&i.SourceKey,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteVideo = `-- name: DeleteVideo :one
+DELETE FROM videos WHERE id = $1 RETURNING id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at
+`
+
+func (q *Queries) DeleteVideo(ctx context.Context, id uuid.UUID) (Video, error) {
+	row := q.db.QueryRow(ctx, deleteVideo, id)
 	var i Video
 	err := row.Scan(
 		&i.ID,
@@ -81,8 +118,6 @@ const getVideoForUpdate = `-- name: GetVideoForUpdate :one
 SELECT id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at FROM videos WHERE id = $1 FOR UPDATE
 `
 
-// Locks the row for the caller's transaction so a concurrent guarded
-// transition cannot interleave between the read and the write.
 func (q *Queries) GetVideoForUpdate(ctx context.Context, id uuid.UUID) (Video, error) {
 	row := q.db.QueryRow(ctx, getVideoForUpdate, id)
 	var i Video
@@ -103,6 +138,50 @@ func (q *Queries) GetVideoForUpdate(ctx context.Context, id uuid.UUID) (Video, e
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listVideos = `-- name: ListVideos :many
+SELECT id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at FROM videos ORDER BY created_at DESC LIMIT $1 OFFSET $2
+`
+
+type ListVideosParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListVideos(ctx context.Context, arg ListVideosParams) ([]Video, error) {
+	rows, err := q.db.Query(ctx, listVideos, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Video
+	for rows.Next() {
+		var i Video
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Status,
+			&i.Duration,
+			&i.Width,
+			&i.Height,
+			&i.SizeBytes,
+			&i.MasterPlaylist,
+			&i.Thumbnail,
+			&i.SourceBucket,
+			&i.SourceKey,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markFailed = `-- name: MarkFailed :one
@@ -146,8 +225,6 @@ WHERE id = $1
 RETURNING id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at
 `
 
-// Unguarded on purpose: the worker calls this on SQS redelivery, when the row
-// may already be 'processing'. The API uses MarkProcessingFromUploading.
 func (q *Queries) MarkProcessing(ctx context.Context, id uuid.UUID) (Video, error) {
 	row := q.db.QueryRow(ctx, markProcessing, id)
 	var i Video
@@ -177,8 +254,6 @@ WHERE id = $1 AND status = 'uploading'
 RETURNING id, title, status, duration, width, height, size_bytes, master_playlist, thumbnail, source_bucket, source_key, error_message, created_at, updated_at
 `
 
-// Guarded transition for the API's complete endpoint: matches no row unless
-// the video is still 'uploading', so exactly one concurrent caller wins.
 func (q *Queries) MarkProcessingFromUploading(ctx context.Context, id uuid.UUID) (Video, error) {
 	row := q.db.QueryRow(ctx, markProcessingFromUploading, id)
 	var i Video

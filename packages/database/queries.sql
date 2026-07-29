@@ -39,3 +39,12 @@ UPDATE videos
 SET status = 'failed', error_message = $2
 WHERE id = $1
 RETURNING *;
+
+-- name: ListVideos :many
+SELECT * FROM videos ORDER BY created_at DESC LIMIT $1 OFFSET $2;
+
+-- name: CountVideos :one
+SELECT COUNT(*) FROM videos;
+
+-- name: DeleteVideo :one
+DELETE FROM videos WHERE id = $1 RETURNING *;
