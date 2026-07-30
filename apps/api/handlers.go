@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -28,17 +29,23 @@ type store interface {
 	CompleteUpload(ctx context.Context, id uuid.UUID) (db.Video, error)
 	ListVideos(ctx context.Context, arg db.ListVideosParams) ([]db.Video, error)
 	CountVideos(ctx context.Context) (int64, error)
+	DeleteVideo(ctx context.Context, id uuid.UUID) (db.Video, error)
+}
+
+type assetCleaner interface {
+	deleteVideoAssets(ctx context.Context, v db.Video) error
 }
 
 type handlers struct {
 	store     store
 	presigner *Presigner
+	assets    assetCleaner
 	rawBucket string
 	assetBase string
 }
 
-func newHandlers(s store, p *Presigner, rawBucket, assetBase string) *handlers {
-	return &handlers{store: s, presigner: p, rawBucket: rawBucket, assetBase: assetBase}
+func newHandlers(s store, p *Presigner, assets assetCleaner, rawBucket, assetBase string) *handlers {
+	return &handlers{store: s, presigner: p, assets: assets, rawBucket: rawBucket, assetBase: assetBase}
 }
 
 type videoJSON struct {
@@ -219,6 +226,32 @@ func (h *handlers) getVideo(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, h.toJSON(video))
+}
+
+func (h *handlers) deleteVideo(c *gin.Context) {
+	id, ok := videoID(c)
+	if !ok {
+		return
+	}
+
+	deleted, err := h.store.DeleteVideo(c.Request.Context(), id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		fail(c, http.StatusNotFound, "not_found", "video not found")
+		return
+	}
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "internal_error", "could not delete video")
+		return
+	}
+
+	// The row must already be gone before S3 cleanup runs: sequence-diagrams.md's
+	// "Deletion Flow" says this ordering means a video can never be visible via
+	// the API while its assets are only partially deleted.
+	if err := h.assets.deleteVideoAssets(c.Request.Context(), deleted); err != nil {
+		log.Printf("video %s: asset cleanup failed: %v", deleted.ID, err)
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 func (h *handlers) completeUpload(c *gin.Context) {

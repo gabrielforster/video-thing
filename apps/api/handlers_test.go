@@ -91,6 +91,27 @@ func (f *fakeStore) CountVideos(_ context.Context) (int64, error) {
 	return int64(len(f.videos)), nil
 }
 
+func (f *fakeStore) DeleteVideo(_ context.Context, id uuid.UUID) (db.Video, error) {
+	v, ok := f.videos[id]
+	if !ok {
+		return db.Video{}, pgx.ErrNoRows
+	}
+	delete(f.videos, id)
+	return v, nil
+}
+
+type fakeAssetCleaner struct {
+	err     error
+	deleted []db.Video
+}
+
+func newFakeAssetCleaner() *fakeAssetCleaner { return &fakeAssetCleaner{} }
+
+func (f *fakeAssetCleaner) deleteVideoAssets(_ context.Context, v db.Video) error {
+	f.deleted = append(f.deleted, v)
+	return f.err
+}
+
 func testRouter(t *testing.T, s store) *gin.Engine {
 	t.Helper()
 	return testRouterWithPing(t, s, func(context.Context) error { return nil })
@@ -98,9 +119,14 @@ func testRouter(t *testing.T, s store) *gin.Engine {
 
 func testRouterWithPing(t *testing.T, s store, ping func(context.Context) error) *gin.Engine {
 	t.Helper()
+	return testRouterWithAssets(t, s, newFakeAssetCleaner(), ping)
+}
+
+func testRouterWithAssets(t *testing.T, s store, assets assetCleaner, ping func(context.Context) error) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	h := newHandlers(s, NewPresigner(testS3Client(t), "video-thing-dev-raw-uploads", 15*time.Minute),
-		"video-thing-dev-raw-uploads", "http://localhost:4566/video-thing-dev-processed-assets")
+		assets, "video-thing-dev-raw-uploads", "http://localhost:4566/video-thing-dev-processed-assets")
 	return newRouter(h, ping)
 }
 
@@ -336,6 +362,53 @@ func TestListVideosRejectsInvalidOffset(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("offset=%q: status = %d, want 400: %s", offset, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestDeleteVideoReturns204AndCleansAssets(t *testing.T) {
+	s := newFakeStore()
+	id := uuid.New()
+	s.videos[id] = db.Video{ID: id, Title: "clip", Status: db.VideoStatusReady, SourceBucket: "raw", SourceKey: "raw/" + id.String()}
+	assets := newFakeAssetCleaner()
+
+	rec := do(t, testRouterWithAssets(t, s, assets, func(context.Context) error { return nil }),
+		http.MethodDelete, "/videos/"+id.String(), nil)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rec.Body.String())
+	}
+	if _, ok := s.videos[id]; ok {
+		t.Fatal("video still present in store after delete")
+	}
+	if len(assets.deleted) != 1 || assets.deleted[0].ID != id {
+		t.Fatalf("assets.deleted = %+v, want exactly one entry for %s", assets.deleted, id)
+	}
+}
+
+func TestDeleteVideoNotFound(t *testing.T) {
+	rec := do(t, testRouter(t, newFakeStore()), http.MethodDelete, "/videos/"+uuid.New().String(), nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestDeleteVideoReturns204EvenWhenAssetCleanupFails(t *testing.T) {
+	s := newFakeStore()
+	id := uuid.New()
+	s.videos[id] = db.Video{ID: id, Title: "clip", Status: db.VideoStatusReady}
+	assets := &fakeAssetCleaner{err: errors.New("s3 unavailable")}
+
+	rec := do(t, testRouterWithAssets(t, s, assets, func(context.Context) error { return nil }),
+		http.MethodDelete, "/videos/"+id.String(), nil)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (row is deleted regardless of S3 cleanup outcome): %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := s.videos[id]; ok {
+		t.Fatal("video still present in store after delete")
 	}
 }
 

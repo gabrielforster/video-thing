@@ -43,7 +43,7 @@ func main() {
 	})
 
 	h := newHandlers(newPGStore(pool), NewPresigner(s3Client, cfg.RawBucket, 15*time.Minute),
-		cfg.RawBucket, cfg.PublicAssetBaseURL)
+		NewS3AssetCleaner(s3Client, cfg.ProcessedBucket), cfg.RawBucket, cfg.PublicAssetBaseURL)
 
 	r := newRouter(h, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)

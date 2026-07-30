@@ -27,6 +27,7 @@ func newRouter(h *handlers, ping func(context.Context) error) *gin.Engine {
 	r.POST("/videos", h.createVideo)
 	r.GET("/videos", h.listVideos)
 	r.GET("/videos/:id", h.getVideo)
+	r.DELETE("/videos/:id", h.deleteVideo)
 	r.POST("/videos/:id/complete", h.completeUpload)
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
