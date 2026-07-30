@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -248,7 +247,7 @@ func (h *handlers) deleteVideo(c *gin.Context) {
 	// "Deletion Flow" says this ordering means a video can never be visible via
 	// the API while its assets are only partially deleted.
 	if err := h.assets.deleteVideoAssets(c.Request.Context(), deleted); err != nil {
-		log.Printf("video %s: asset cleanup failed: %v", deleted.ID, err)
+		requestLogger(c).Error("asset cleanup failed", "video_id", deleted.ID.String(), "error", err.Error())
 	}
 
 	c.Status(http.StatusNoContent)

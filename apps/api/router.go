@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+const loggerContextKey = "logger"
 
 func cors() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -20,9 +25,40 @@ func cors() gin.HandlerFunc {
 	}
 }
 
+func requestLogging() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		reqID := c.GetHeader("X-Request-Id")
+		if reqID == "" {
+			reqID = uuid.New().String()
+		}
+		c.Header("X-Request-Id", reqID)
+		logger := slog.Default().With("request_id", reqID)
+		c.Set(loggerContextKey, logger)
+
+		start := time.Now()
+		c.Next()
+
+		logger.Info("request",
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"status", c.Writer.Status(),
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	}
+}
+
+func requestLogger(c *gin.Context) *slog.Logger {
+	if v, ok := c.Get(loggerContextKey); ok {
+		if logger, ok := v.(*slog.Logger); ok {
+			return logger
+		}
+	}
+	return slog.Default()
+}
+
 func newRouter(h *handlers, ping func(context.Context) error) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery(), gin.Logger(), cors())
+	r.Use(gin.Recovery(), requestLogging(), cors())
 
 	r.POST("/videos", h.createVideo)
 	r.GET("/videos", h.listVideos)

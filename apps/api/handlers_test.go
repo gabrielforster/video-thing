@@ -455,6 +455,30 @@ func TestCompleteNotFound(t *testing.T) {
 	}
 }
 
+func TestRequestLoggingEchoesInboundRequestID(t *testing.T) {
+	r := testRouter(t, newFakeStore())
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("X-Request-Id", "test-request-id")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("X-Request-Id"); got != "test-request-id" {
+		t.Fatalf("X-Request-Id = %q, want %q", got, "test-request-id")
+	}
+}
+
+func TestRequestLoggingGeneratesRequestIDWhenAbsent(t *testing.T) {
+	rec := do(t, testRouter(t, newFakeStore()), http.MethodGet, "/healthz", nil)
+
+	got := rec.Header().Get("X-Request-Id")
+	if got == "" {
+		t.Fatal("X-Request-Id header missing")
+	}
+	if _, err := uuid.Parse(got); err != nil {
+		t.Fatalf("X-Request-Id = %q, not a UUID: %v", got, err)
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	rec := do(t, testRouter(t, newFakeStore()), http.MethodGet, "/healthz", nil)
 	if rec.Code != http.StatusOK {

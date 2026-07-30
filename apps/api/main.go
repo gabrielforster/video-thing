@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -14,24 +14,28 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	gin.SetMode(gin.ReleaseMode)
 
 	cfg, err := LoadConfig(os.Getenv)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("config", "error", err)
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		slog.Error("database", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
-		log.Fatalf("aws config: %v", err)
+		slog.Error("aws config", "error", err)
+		os.Exit(1)
 	}
 	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		// LocalStack needs an explicit endpoint and path-style addressing;
@@ -51,8 +55,9 @@ func main() {
 		return pool.Ping(ctx)
 	})
 
-	log.Printf("api listening on :%s", cfg.Port)
+	slog.Info("api listening", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("listen: %v", err)
+		slog.Error("listen", "error", err)
+		os.Exit(1)
 	}
 }
