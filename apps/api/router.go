@@ -25,6 +25,7 @@ func newRouter(h *handlers, ping func(context.Context) error) *gin.Engine {
 	r.Use(gin.Recovery(), gin.Logger(), cors())
 
 	r.POST("/videos", h.createVideo)
+	r.GET("/videos", h.listVideos)
 	r.GET("/videos/:id", h.getVideo)
 	r.POST("/videos/:id/complete", h.completeUpload)
 

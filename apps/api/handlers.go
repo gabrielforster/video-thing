@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,10 +15,19 @@ import (
 	"github.com/gabrielforster/video-thing/packages/database/db"
 )
 
+const (
+	defaultListLimit  = 20
+	minListLimit      = 1
+	maxListLimit      = 100
+	defaultListOffset = 0
+)
+
 type store interface {
 	CreateVideo(ctx context.Context, arg db.CreateVideoParams) (db.Video, error)
 	GetVideo(ctx context.Context, id uuid.UUID) (db.Video, error)
 	CompleteUpload(ctx context.Context, id uuid.UUID) (db.Video, error)
+	ListVideos(ctx context.Context, arg db.ListVideosParams) ([]db.Video, error)
+	CountVideos(ctx context.Context) (int64, error)
 }
 
 type handlers struct {
@@ -110,6 +121,76 @@ func (h *handlers) createVideo(c *gin.Context) {
 			"method":    "PUT",
 			"expiresAt": expiresAt,
 			"headers":   gin.H{"Content-Type": UploadContentType},
+		},
+	})
+}
+
+type pagination struct {
+	Limit  int32
+	Offset int32
+}
+
+func parsePagination(c *gin.Context) (pagination, bool) {
+	limit := int32(defaultListLimit)
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n < minListLimit || n > maxListLimit {
+			fail(c, http.StatusBadRequest, "invalid_request",
+				fmt.Sprintf("limit must be an integer between %d and %d", minListLimit, maxListLimit))
+			return pagination{}, false
+		}
+		limit = int32(n)
+	}
+
+	offset := int32(defaultListOffset)
+	if raw := c.Query("offset"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n < defaultListOffset {
+			fail(c, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
+			return pagination{}, false
+		}
+		offset = int32(n)
+	}
+
+	return pagination{Limit: limit, Offset: offset}, true
+}
+
+func (h *handlers) listVideos(c *gin.Context) {
+	p, ok := parsePagination(c)
+	if !ok {
+		return
+	}
+
+	videos, err := h.store.ListVideos(c.Request.Context(), db.ListVideosParams{Limit: p.Limit, Offset: p.Offset})
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "internal_error", "could not list videos")
+		return
+	}
+	total, err := h.store.CountVideos(c.Request.Context())
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "internal_error", "could not count videos")
+		return
+	}
+
+	// make(...), not a nil "var" slice: an empty page must serialize as [],
+	// not JSON null.
+	items := make([]videoJSON, len(videos))
+	for i, v := range videos {
+		items[i] = h.toJSON(v)
+	}
+
+	var nextOffset *int32
+	if next := p.Offset + p.Limit; int64(next) < total {
+		nextOffset = &next
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"pagination": gin.H{
+			"limit":      p.Limit,
+			"offset":     p.Offset,
+			"total":      total,
+			"nextOffset": nextOffset,
 		},
 	})
 }
