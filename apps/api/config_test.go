@@ -11,6 +11,7 @@ func TestLoadConfigDefaultsPort(t *testing.T) {
 	cfg, err := LoadConfig(env(map[string]string{
 		"DATABASE_URL":          "postgres://localhost/db",
 		"RAW_BUCKET":            "raw",
+		"PROCESSED_BUCKET":      "processed",
 		"PUBLIC_ASSET_BASE_URL": "http://localhost:4566/processed",
 	}))
 	if err != nil {
@@ -29,7 +30,7 @@ func TestLoadConfigRequiresVars(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing DATABASE_URL")
 	}
-	if got := err.Error(); !strings.Contains(got, "DATABASE_URL") || !strings.Contains(got, "PUBLIC_ASSET_BASE_URL") {
+	if got := err.Error(); !strings.Contains(got, "DATABASE_URL") || !strings.Contains(got, "PUBLIC_ASSET_BASE_URL") || !strings.Contains(got, "PROCESSED_BUCKET") {
 		t.Fatalf("error %q should name every missing variable", got)
 	}
 }

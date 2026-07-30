@@ -9,6 +9,7 @@ import (
 type Config struct {
 	DatabaseURL        string
 	RawBucket          string
+	ProcessedBucket    string
 	AWSEndpointURL     string
 	PublicAssetBaseURL string
 	Port               string
@@ -18,6 +19,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		DatabaseURL:        getenv("DATABASE_URL"),
 		RawBucket:          getenv("RAW_BUCKET"),
+		ProcessedBucket:    getenv("PROCESSED_BUCKET"),
 		AWSEndpointURL:     getenv("AWS_ENDPOINT_URL"),
 		PublicAssetBaseURL: strings.TrimSuffix(getenv("PUBLIC_ASSET_BASE_URL"), "/"),
 		Port:               getenv("PORT"),
@@ -30,6 +32,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	for name, value := range map[string]string{
 		"DATABASE_URL":          cfg.DatabaseURL,
 		"RAW_BUCKET":            cfg.RawBucket,
+		"PROCESSED_BUCKET":      cfg.ProcessedBucket,
 		"PUBLIC_ASSET_BASE_URL": cfg.PublicAssetBaseURL,
 	} {
 		if value == "" {
