@@ -2,7 +2,7 @@
 
 Cloud-native video platform: upload, transcode to adaptive-bitrate HLS, deliver via CDN. Event-driven, horizontally scalable, deployed on AWS via Terraform.
 
-**Status:** vertical slice implemented. `apps/api`, `apps/worker`, and `apps/web` run locally against LocalStack (S3 + SQS) and Postgres: a browser can upload a file, the worker transcodes it to 720p HLS with a thumbnail, and the page plays it back. `scripts/e2e.sh` proves the pipeline end to end from a cold stack. The full rendition ladder (only 720p exists today), deletion, listing, CloudFront, and deployment to AWS remain unbuilt — architecture, infrastructure, and API contract for that fuller scope are specified and the Terraform module tree is implemented and `terraform validate`-clean.
+**Status:** vertical slice implemented, plus paginated listing, deletion (with S3 asset cleanup), and structured JSON logging (`docs/plans/api-list-delete-plan.md`). `apps/api`, `apps/worker`, and `apps/web` run locally against LocalStack (S3 + SQS) and Postgres: a browser can upload a file, the worker transcodes it to 720p HLS with a thumbnail, and the page plays it back; `GET /videos` lists videos with `limit`/`offset` pagination and `DELETE /videos/{id}` removes the row and its S3 assets. `scripts/e2e.sh` proves the pipeline, listing, and deletion end to end from a cold stack. The full rendition ladder (only 720p exists today), a dashboard UI, CloudFront, and deployment to AWS remain unbuilt — architecture, infrastructure, and API contract for that fuller scope are specified and the Terraform module tree is implemented and `terraform validate`-clean.
 
 ## Run it locally
 
@@ -85,7 +85,7 @@ infrastructure/
         modules/          11 reusable modules
         environments/      dev (implemented), staging/production (reserved)
 apps/
-    api/                Gin service: presigned uploads, video CRUD, health/readiness
+    api/                Gin service: presigned uploads, video CRUD, listing, deletion, health/readiness
     worker/             SQS consumer: ffmpeg transcode to 720p HLS, thumbnails, DB updates
     web/                Vite/React upload page with hls.js playback
 packages/

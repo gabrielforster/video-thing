@@ -25,11 +25,11 @@ A user opens the web page, picks a video file, and watches it become playable:
 | Deferred | Owning spec |
 |---|---|
 | 1080p / 480p / 360p renditions, source-resolution-aware selection | worker spec |
-| `DELETE /videos/{id}` and asset cleanup | api spec |
-| `GET /videos` list, pagination | api spec |
 | Dashboard and video-detail pages, TanStack Query/Router | web spec |
 | CloudFront in the playback path | infrastructure spec |
 | ECS deployment, CI/CD, monitoring, DLQ wiring | delivery spec |
+
+`DELETE /videos/{id}` (with S3 asset cleanup) and `GET /videos` (pagination) shipped in `docs/plans/api-list-delete-plan.md`.
 
 Deferring CloudFront costs nothing at the code level: playback URLs are built from a single environment variable ([Section 9](#9-playback-urls)).
 
