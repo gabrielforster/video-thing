@@ -12,3 +12,6 @@ crash.*.log
 
 node_modules/
 dist/
+
+# Local ai-jail sandbox config: machine-specific paths
+.ai-jail
